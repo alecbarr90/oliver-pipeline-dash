@@ -1,0 +1,344 @@
+/* Main styles for Oliver Pipeline Dashboard - Glassmorphism Edition */
+
+/* ========================================
+   BASE STYLES
+   ======================================== */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: linear-gradient(135deg, #63a4ff 0%, #83eaf1 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  position: relative;
+  color: #333;
+}
+
+/* Add subtle shapes in the background */
+body::before {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: 
+    radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.2) 0%, transparent 20%),
+    radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.15) 0%, transparent 25%);
+  z-index: -1;
+}
+
+/* ========================================
+   GLASSMORPHISM STYLES
+   ======================================== */
+.glass {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+}
+
+.glass:hover {
+  box-shadow: 0 8px 15px rgba(0, 0, 0, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.glass-dark {
+  background: rgba(30, 41, 59, 0.65);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.glass-card {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.glass-card-inner {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.375rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-btn {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.375rem;
+  transition: all 0.2s ease;
+}
+
+.glass-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+}
+
+.glass-blue {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.glass-blue:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.glass-red {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.glass-red:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.glass-green {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.glass-green:hover {
+  background: rgba(34, 197, 94, 0.25);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.glass-purple {
+  background: rgba(124, 58, 237, 0.15);
+  border-color: rgba(124, 58, 237, 0.3);
+}
+
+.glass-purple:hover {
+  background: rgba(124, 58, 237, 0.25);
+  border-color: rgba(124, 58, 237, 0.4);
+}
+
+.glass-amber {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.glass-amber:hover {
+  background: rgba(245, 158, 11, 0.25);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
+.glass-input {
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.375rem;
+  color: #333;
+  transition: all 0.2s ease;
+}
+
+.glass-input:focus {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+  outline: none;
+}
+
+.glass-table {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.glass-table th {
+  background: rgba(30, 41, 59, 0.2);
+  color: white;
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.glass-table tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.glass-table tr:hover {
+  background: rgba(255, 255, 255,.1);
+}
+
+/* ========================================
+   CHART STYLES
+   ======================================== */
+.recharts-wrapper {
+  margin: 0 auto;
+}
+
+/* Control pie chart label font size */
+.recharts-pie-label-text {
+  font-size: 10px;
+}
+
+/* Chart customizations for glassmorphism */
+.recharts-default-tooltip {
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  background-color: rgba(255, 255, 255, 0.25) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 0.5rem !important;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
+}
+
+.recharts-cartesian-grid line {
+  stroke: rgba(255, 255, 255, 0.2);
+}
+
+.recharts-cartesian-axis-line {
+  stroke: rgba(255, 255, 255, 0.3);
+}
+
+.recharts-text {
+  fill: #333;
+}
+
+/* ========================================
+   CAPACITY VISUALIZATION STYLES
+   ======================================== */
+
+/* Diagonal stripe pattern for overflow segments */
+.capacity-overflow {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.5),
+    rgba(255, 255, 255, 0.5) 8px,
+    transparent 8px,
+    transparent 16px
+  );
+}
+
+/* Vertical line indicating capacity limit */
+.capacity-limit {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background-color: rgba(255, 255, 255, 0.5);
+  z-index: 10;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+}
+
+/* ========================================
+   NOTIFICATION STYLES
+   ======================================== */
+.notification {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.375rem;
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out forwards;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.notification-success {
+  background-color: rgba(209, 250, 229, 0.8);
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  color: #065f46;
+}
+
+.notification-error {
+  background-color: rgba(254, 226, 226, 0.8);
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  color: #b91c1c;
+}
+
+.notification-info {
+  background-color: rgba(219, 234, 254, 0.8);
+  border: 1px solid rgba(96, 165, 250, 0.5);
+  color: #1e40af;
+}
+
+/* ========================================
+   UTILITY CLASSES
+   ======================================== */
+.dynamic-width {
+  transition: width 0.3s ease;
+}
+
+.dynamic-color {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Utility classes for status colors */
+.status-confirmed { color: #4CAF50; }
+.status-ongoing { color: #2196F3; }
+.status-pending { color: #FF9800; }
+.status-pitch { color: #9C27B0; }
+.status-prospect { color: #607D8B; }
+.status-in-progress { color: #00BCD4; }
+.status-pipeline { color: #E91E63; }
+.status-active-account { color: #3F51B5; }
+
+/* Glassmorphic status backgrounds */
+.status-bg-confirmed { 
+  background-color: rgba(76, 175, 80, 0.1); 
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(76, 175, 80, 0.2);
+}
+.status-bg-ongoing { 
+  background-color: rgba(33, 150, 243, 0.1);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(33, 150, 243, 0.2);
+}
+.status-bg-pending { 
+  background-color: rgba(255, 152, 0, 0.1);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(255, 152, 0, 0.2);
+}
+.status-bg-pitch { 
+  background-color: rgba(156, 39, 176, 0.1);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(156, 39, 176, 0.2);
+}
+.status-bg-prospect { 
+  background-color: rgba(96, 125, 139, 0.1);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(96, 125, 139, 0.2);
+}
+.status-bg-in-progress { 
+  background-color: rgba(0, 188, 212, 0.1);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(0, 188, 212, 0.2);
+}
+.status-bg-pipeline { 
+  background-color: rgba(233, 30, 99, 0.1);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(233, 30, 99, 0.2);
+}
+.status-bg-active-account { 
+  background-color: rgba(63, 81, 181, 0.1);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  border: 1px solid rgba(63, 81, 181, 0.2);
+}

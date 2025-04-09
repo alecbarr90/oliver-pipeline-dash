@@ -1,0 +1,193 @@
+/* Simplified styles for Oliver Pipeline Dashboard */
+
+/* Base styling */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: #f0f2f5;
+}
+
+/* Card styles */
+.neu-container {
+  background-color: white;
+  border: 3px solid black;
+  border-radius: 8px;
+  box-shadow: 5px 5px 0 0 black;
+}
+
+.neu-card {
+  background-color: white;
+  border: 3px solid black;
+  border-radius: 8px;
+  box-shadow: 5px 5px 0 0 black;
+}
+
+.neu-card-inner {
+  border-radius: 4px;
+  border: 2px solid black;
+  padding: 1rem;
+}
+
+/* Button styles */
+.neu-btn {
+  background-color: white;
+  border: 2px solid black;
+  border-radius: 8px;
+  box-shadow: 3px 3px 0 0 black;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  font-weight: 600;
+}
+
+.neu-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0 0 black;
+}
+
+.neu-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0 0 black;
+}
+
+/* Color variants */
+.neu-primary {
+  background-color: #ff5252;
+  color: white;
+}
+
+.neu-secondary {
+  background-color: #3300ff;
+  color: white;
+}
+
+.neu-accent1 {
+  background-color: #00d9ff;
+}
+
+.neu-accent2 {
+  background-color: #ffcc01;
+}
+
+.neu-accent3 {
+  background-color: #32ff7e;
+}
+
+.neu-accent4 {
+  background-color: #9980fa;
+  color: white;
+}
+
+/* Input styles */
+.neu-input {
+  background-color: white;
+  border: 2px solid black;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  box-shadow: 2px 2px 0 0 rgba(0, 0, 0, 0.2);
+  color: black !important;
+}
+
+/* Table styles */
+.neu-table {
+  background-color: white;
+  border: 2px solid black;
+  border-radius: 8px;
+  box-shadow: 3px 3px 0 0 black;
+  overflow: hidden;
+}
+
+.neu-table th {
+  background-color: #00d9ff;
+  color: black;
+  font-weight: 600;
+}
+
+.neu-table tr {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.neu-table-striped tr:nth-child(even) {
+  background-color: rgba(0, 217, 255, 0.05);
+}
+
+/* Status badge */
+.status-badge {
+  border: 2px solid black;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-weight: 600;
+  display: inline-block;
+}
+
+/* Capacity bar styles */
+.thick-border {
+  border: 2px solid black;
+}
+
+.capacity-overflow {
+  opacity: 0.8;
+}
+
+.capacity-limit {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  background-color: black;
+  z-index: 10;
+}
+
+/* Tooltip styles */
+.tooltip-container {
+  position: relative;
+  display: inline-block;
+}
+
+.tooltip-container:hover .tooltip-box {
+  visibility: visible;
+  opacity: 1;
+}
+
+.tooltip-box {
+  position: absolute;
+  z-index: 10;
+  background-color: white;
+  border: 2px solid black;
+  border-radius: 8px;
+  box-shadow: 3px 3px 0 0 black;
+  padding: 0.75rem;
+  transition: opacity 0.2s;
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* Notification styles */
+.notification {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  padding: 1rem;
+  border-radius: 8px;
+  z-index: 1000;
+  animation: bounceIn 0.3s ease-out forwards;
+  border: 2px solid black;
+  box-shadow: 3px 3px 0 0 black;
+  font-weight: 600;
+}
+
+@keyframes bounceIn {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.1); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.notification-success {
+  background-color: #32ff7e;
+}
+
+.notification-error {
+  background-color: #ff5252;
+  color: white;
+}
+
+.notification-info {
+  background-color: #00d9ff;
+}

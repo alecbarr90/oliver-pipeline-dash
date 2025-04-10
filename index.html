@@ -1066,27 +1066,39 @@
         
         // First check if we can even access Firestore with current permissions
         let canAccessFirestore = false;
-        try {
-          // Try a quick test read to check permissions
-          if (authUser && authUser.uid) {
-            // Touch the collection to see if we have permission
-            await db.collection('userData').doc(authUser.uid).get();
-            canAccessFirestore = true;
-          }
-        } catch (permError) {
-          console.warn('[SYNC DEBUG] No Firestore access permission, skipping listeners setup');
-          setSyncStatus('offline');
-        }
         
-        // Set up listeners for each data type only if we have permission
-        if (canAccessFirestore) {
-          setupListener('teamMembers', setTeamMembers, teamMembers);
-          setupListener('currentProjects', setCurrentProjects, currentProjects);
-          setupListener('semblanceOpportunities', setSemblanceOpportunities, semblanceOpportunities);
-          setupListener('pipelineProjects', setPipelineProjects, pipelineProjects);
-          setupListener('resourcingInsights', setResourcingInsights, resourcingInsights);
-          setupListener('internalActivities', setInternalActivities, internalActivities);
-        }
+        // We need to check permissions before setting up listeners
+        const checkPermissions = async () => {
+          try {
+            // Try a quick test read to check permissions
+            if (authUser && authUser.uid) {
+              // Touch the collection to see if we have permission
+              await db.collection('userData').doc(authUser.uid).get();
+              return true;
+            }
+          } catch (permError) {
+            console.warn('[SYNC DEBUG] No Firestore access permission, skipping listeners setup');
+            setSyncStatus('offline');
+          }
+          return false;
+        };
+        
+        // Set up listeners only when we confirm we have permission
+        checkPermissions().then(hasPermission => {
+          console.log(`[SYNC DEBUG] Firestore permission check result: ${hasPermission}`);
+          // Only set up listeners if we have permission
+          if (hasPermission) {
+            setupListener('teamMembers', setTeamMembers, teamMembers);
+            setupListener('currentProjects', setCurrentProjects, currentProjects);
+            setupListener('semblanceOpportunities', setSemblanceOpportunities, semblanceOpportunities);
+            setupListener('pipelineProjects', setPipelineProjects, pipelineProjects);
+            setupListener('resourcingInsights', setResourcingInsights, resourcingInsights);
+            setupListener('internalActivities', setInternalActivities, internalActivities);
+          } else {
+            // Show offline notification if no permission
+            showNotification('Using local data only - Firebase access restricted', 'warning');
+          }
+        });
         
         return () => {
           // Clean up: cancel any pending updates and unsubscribe from listeners

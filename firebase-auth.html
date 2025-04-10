@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Firebase Auth for OLIVER Dashboard</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React and ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f5f5f5;
+      color: #333;
+    }
+    .container {
+      max-width: 500px;
+      margin: 40px auto;
+      padding: 20px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      border: 2px solid black;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input {
+      width: 100%;
+      padding: 8px;
+      border: 2px solid #ddd;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    .error {
+      color: #e53e3e;
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #fed7d7;
+      border-radius: 4px;
+    }
+    .success {
+      color: #38a169;
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #c6f6d5;
+      border-radius: 4px;
+    }
+    button {
+      background-color: #4299e1;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      width: 100%;
+      margin-top: 5px;
+    }
+    button.secondary {
+      background-color: #a0aec0;
+    }
+    button:hover {
+      opacity: 0.9;
+    }
+    button:disabled {
+      background-color: #cbd5e0;
+      cursor: not-allowed;
+    }
+    .message {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 14px;
+      color: #718096;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script>
+    // Initialize Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyB5vv6Jt3YNkgM9EGPlsUgFLsWbUBxMMkY",
+      authDomain: "oliver-pipeline-dashboard.firebaseapp.com",
+      projectId: "oliver-pipeline-dashboard",
+      storageBucket: "oliver-pipeline-dashboard.appspot.com",
+      messagingSenderId: "428915476384",
+      appId: "1:428915476384:web:f84992725b976292efc6c5"
+    };
+    
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+  </script>
+  
+  <script type="text/babel">
+    // Authentication App
+    const AuthApp = () => {
+      const [user, setUser] = React.useState(null);
+      const [isAdmin, setIsAdmin] = React.useState(false);
+      const [loading, setLoading] = React.useState(true);
+      
+      // Authentication state
+      React.useEffect(() => {
+        const unsubscribe = auth.onAuthStateChanged(user => {
+          setUser(user);
+          setIsAdmin(user && user.email === 'alecbarr@oliver.agency');
+          setLoading(false);
+        });
+        
+        return () => unsubscribe();
+      }, []);
+      
+      // If still checking auth state
+      if (loading) {
+        return (
+          <div className="container">
+            <h1 className="text-2xl font-bold mb-4 text-center">Loading...</h1>
+          </div>
+        );
+      }
+      
+      // If user is logged in
+      if (user) {
+        return <UserProfile user={user} isAdmin={isAdmin} />;
+      }
+      
+      // If user is not logged in
+      return <LoginForm />;
+    };
+    
+    // Login Form
+    const LoginForm = () => {
+      const [email, setEmail] = React.useState('');
+      const [password, setPassword] = React.useState('');
+      const [error, setError] = React.useState('');
+      const [loading, setLoading] = React.useState(false);
+      
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        setError('');
+        
+        try {
+          await auth.signInWithEmailAndPassword(email, password);
+        } catch (error) {
+          setError(error.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      const handleGuestLogin = async () => {
+        setLoading(true);
+        setError('');
+        
+        try {
+          await auth.signInAnonymously();
+        } catch (error) {
+          setError(error.message);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      return (
+        <div className="container">
+          <h1 className="text-2xl font-bold mb-4 text-center">OLIVER Dashboard Login</h1>
+          
+          {error && <div className="error">{error}</div>}
+          
+          <form onSubmit={handleLogin}>
+            <div className="form-group">
+              <label htmlFor="email">Email</label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            
+            <button type="submit" disabled={loading}>
+              {loading ? 'Logging in...' : 'Login as Admin'}
+            </button>
+          </form>
+          
+          <div className="mt-4">
+            <button 
+              className="secondary"
+              onClick={handleGuestLogin} 
+              disabled={loading}
+            >
+              {loading ? 'Loading...' : 'Continue as Guest (View Only)'}
+            </button>
+          </div>
+          
+          <div className="message">
+            <p>Admin access is restricted to authorized users.<br />Guest access provides view-only capabilities.</p>
+          </div>
+        </div>
+      );
+    };
+    
+    // User Profile component
+    const UserProfile = ({ user, isAdmin }) => {
+      const handleLogout = async () => {
+        try {
+          await auth.signOut();
+        } catch (error) {
+          console.error('Error signing out:', error);
+        }
+      };
+      
+      const goToDashboard = () => {
+        // Save auth state in localStorage (not secure but simple for now)
+        localStorage.setItem('oliverDashboard_authUser', JSON.stringify({
+          uid: user.uid,
+          email: user.email,
+          isAdmin: isAdmin,
+          isAnonymous: user.isAnonymous
+        }));
+        
+        // Redirect to main dashboard
+        window.location.href = 'index-original.html';
+      };
+      
+      return (
+        <div className="container">
+          <h1 className="text-2xl font-bold mb-4 text-center">Authentication Successful</h1>
+          
+          <div className="success mb-4">
+            {isAdmin 
+              ? "You're logged in as an admin user." 
+              : "You're logged in as a guest user (view-only mode)."}
+          </div>
+          
+          <div className="mb-6 text-sm">
+            <p><strong>User ID:</strong> {user.uid}</p>
+            <p><strong>Email:</strong> {user.email || 'Anonymous user'}</p>
+            <p><strong>Account type:</strong> {isAdmin ? 'Administrator' : user.isAnonymous ? 'Guest' : 'Standard user'}</p>
+          </div>
+          
+          <button onClick={goToDashboard}>
+            Go to Dashboard
+          </button>
+          
+          <button className="secondary mt-2" onClick={handleLogout}>
+            Logout
+          </button>
+        </div>
+      );
+    };
+    
+    // Render the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<AuthApp />);
+  </script>
+</body>
+</html>

@@ -19,11 +19,6 @@
   <!-- Babel for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-  
   <!-- Custom CSS -->
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -31,118 +26,24 @@
   <div id="root" class="max-w-7xl mx-auto"></div>
 
   <script type="text/babel">
-    // Initialize Firebase
-    const firebaseConfig = {
-      // TODO: Replace with your Firebase project config
-      apiKey: "AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-      authDomain: "oliver-pipeline-dash.firebaseapp.com",
-      projectId: "oliver-pipeline-dash",
-      storageBucket: "oliver-pipeline-dash.appspot.com",
-      messagingSenderId: "XXXXXXXXXXXX",
-      appId: "1:XXXXXXXXXXXX:web:XXXXXXXXXXXX"
-    };
-    
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const auth = firebase.auth();
-    const db = firebase.firestore();
-    
     // Destructure the components we need from Recharts
     const { 
       BarChart, Bar, LineChart, Line, PieChart, Pie, XAxis, YAxis, 
       CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell 
     } = Recharts;
     
-    // ------ Firebase Authentication Functions ------
-    
-    // Check if user is admin
-    const isUserAdmin = (user) => {
-      // You'd typically check a custom claim or a role in Firestore
-      // For now, we'll use a simple email check
-      return user && user.email === 'admin@example.com';
-    };
-    
-    // ------ Data Storage Functions ------
-    
-    // Load data from Firestore
-    const loadFromFirestore = async (collection, defaultValue) => {
-      try {
-        // For projectCategories, always use the defaults to ensure fixed categories
-        if (collection === 'projectCategories') {
-          return defaultValue;
-        }
-        
-        // Check if we're authenticated
-        if (!auth.currentUser) {
-          throw new Error('User not authenticated');
-        }
-        
-        const snapshot = await db.collection(collection).get();
-        if (snapshot.empty) {
-          return defaultValue;
-        }
-        
-        return snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-      } catch (error) {
-        console.error(`Error loading ${collection} from Firestore:`, error);
-        // Fall back to localStorage for backward compatibility
-        return loadFromLocalStorage(collection, defaultValue);
+    // Authentication check function
+    const checkAuthentication = () => {
+      const authUser = localStorage.getItem('oliverDashboard_authUser');
+      if (!authUser) {
+        // Redirect to authentication page if not logged in
+        window.location.href = 'firebase-auth.html';
+        return null;
       }
+      return JSON.parse(authUser);
     };
     
-    // Save data to Firestore
-    const saveToFirestore = async (collection, data) => {
-      try {
-        // For projectCategories, skip saving to ensure we always use the defaults
-        if (collection === 'projectCategories') {
-          return;
-        }
-        
-        // Check if we're authenticated and have admin rights
-        if (!auth.currentUser) {
-          throw new Error('User not authenticated');
-        }
-        
-        if (!isUserAdmin(auth.currentUser)) {
-          throw new Error('User does not have permission to save data');
-        }
-        
-        // Clear existing collection
-        const snapshot = await db.collection(collection).get();
-        const batch = db.batch();
-        
-        snapshot.docs.forEach((doc) => {
-          batch.delete(doc.ref);
-        });
-        
-        // Add new data
-        data.forEach((item) => {
-          // If item has an id already, use it, otherwise create a new document
-          if (item.id && typeof item.id === 'string') {
-            batch.set(db.collection(collection).doc(item.id), item);
-          } else {
-            const newDocRef = db.collection(collection).doc();
-            batch.set(newDocRef, {...item, id: newDocRef.id});
-          }
-        });
-        
-        await batch.commit();
-        showNotification(`${collection} saved to database`);
-        
-        // Also save to localStorage as backup
-        saveToLocalStorage(collection, data);
-      } catch (error) {
-        console.error(`Error saving ${collection} to Firestore:`, error);
-        // Fall back to localStorage
-        saveToLocalStorage(collection, data);
-        showNotification(`Saved to local storage only: ${error.message}`, 'error');
-      }
-    };
-    
-    // Legacy functions for localStorage (for backward compatibility)
+    // Load data from localStorage if available
     const loadFromLocalStorage = (key, defaultValue) => {
       try {
         // For projectCategories, always use the defaults to ensure fixed categories
@@ -186,197 +87,8 @@
       }, 3000);
     };
 
-    // Authentication Component
-    const Auth = ({ onLogin }) => {
-      const [email, setEmail] = React.useState('');
-      const [password, setPassword] = React.useState('');
-      const [error, setError] = React.useState('');
-      const [isLoading, setIsLoading] = React.useState(false);
-      
-      const handleLogin = async (e) => {
-        e.preventDefault();
-        setIsLoading(true);
-        setError('');
-        
-        try {
-          // Sign in with Firebase
-          await auth.signInWithEmailAndPassword(email, password);
-          onLogin();
-        } catch (err) {
-          setError(err.message);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      
-      const handleGuestLogin = async () => {
-        setIsLoading(true);
-        setError('');
-        
-        try {
-          // Sign in anonymously for guest access
-          await auth.signInAnonymously();
-          onLogin();
-        } catch (err) {
-          setError(err.message);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      
-      return (
-        <div className="flex justify-center items-center min-h-screen">
-          <div className="neu-card p-8 w-full max-w-md">
-            <h2 className="text-2xl font-bold mb-6 text-center">Oliver Pipeline Dashboard</h2>
-            
-            {error && (
-              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-                {error}
-              </div>
-            )}
-            
-            <form onSubmit={handleLogin} className="mb-4">
-              <div className="mb-4">
-                <label className="block text-gray-700 mb-2">Email</label>
-                <input
-                  type="email"
-                  className="neu-input p-2 w-full"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              
-              <div className="mb-6">
-                <label className="block text-gray-700 mb-2">Password</label>
-                <input
-                  type="password"
-                  className="neu-input p-2 w-full"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </div>
-              
-              <button
-                type="submit"
-                className="neu-button w-full py-2 bg-blue-500 text-white"
-                disabled={isLoading}
-              >
-                {isLoading ? 'Logging in...' : 'Login as Admin'}
-              </button>
-            </form>
-            
-            <div className="text-center">
-              <button
-                onClick={handleGuestLogin}
-                className="neu-button w-full py-2 bg-gray-200"
-                disabled={isLoading}
-              >
-                {isLoading ? 'Loading...' : 'Continue as Guest (View Only)'}
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    };
-    
-    // Data Migration Helper
-    const migrateLocalStorageToFirestore = async () => {
-      try {
-        // Check if we're authenticated and have admin rights
-        if (!auth.currentUser || !isUserAdmin(auth.currentUser)) {
-          console.error('Migration failed: User not authenticated or not admin');
-          return false;
-        }
-        
-        console.log('Starting data migration from localStorage to Firestore...');
-        
-        // Get all collections from localStorage
-        const collections = ['teamMembers', 'projects', 'pipelineProjects'];
-        
-        // Batch operation for better performance
-        for (const collection of collections) {
-          const data = loadFromLocalStorage(collection, []);
-          if (data && data.length > 0) {
-            console.log(`Migrating ${collection}...`);
-            const batch = db.batch();
-            
-            // Clear existing collection first
-            const snapshot = await db.collection(collection).get();
-            snapshot.docs.forEach((doc) => {
-              batch.delete(doc.ref);
-            });
-            
-            // Add new data
-            data.forEach((item) => {
-              const docRef = db.collection(collection).doc();
-              batch.set(docRef, { ...item, id: docRef.id });
-            });
-            
-            await batch.commit();
-            console.log(`Migrated ${data.length} items to ${collection}`);
-          }
-        }
-        
-        console.log('Migration completed successfully!');
-        return true;
-      } catch (error) {
-        console.error('Migration failed:', error);
-        return false;
-      }
-    };
-    
     // Main Dashboard Component
     const AgencyDashboard = () => {
-      // Auth state
-      const [user, setUser] = React.useState(null);
-      const [isAdmin, setIsAdmin] = React.useState(false);
-      const [authInitialized, setAuthInitialized] = React.useState(false);
-      const [dataMigrated, setDataMigrated] = React.useState(false);
-      
-      // Set up auth state listener
-      React.useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(async (user) => {
-          setUser(user);
-          setIsAdmin(isUserAdmin(user));
-          setAuthInitialized(true);
-          
-          // If this is an admin login and we haven't migrated data yet,
-          // attempt migration from localStorage to Firestore
-          if (user && isUserAdmin(user) && !dataMigrated) {
-            const migrationSuccess = await migrateLocalStorageToFirestore();
-            setDataMigrated(migrationSuccess);
-          }
-        });
-        
-        // Cleanup subscription
-        return () => unsubscribe();
-      }, [dataMigrated]);
-      
-      // Handle logout
-      const handleLogout = async () => {
-        try {
-          await auth.signOut();
-        } catch (error) {
-          console.error('Error signing out:', error);
-        }
-      };
-      
-      // If auth isn't initialized yet, show loading
-      if (!authInitialized) {
-        return (
-          <div className="flex justify-center items-center min-h-screen">
-            <div className="text-xl">Loading...</div>
-          </div>
-        );
-      }
-      
-      // If not authenticated, show login
-      if (!user) {
-        return <Auth onLogin={() => {}} />;
-      }
-      
       // Default values for all state
       // Function to generate a random vibrant color
       const generateRandomColor = () => {
@@ -434,6 +146,8 @@
         }
       ];
       
+      // Get authentication data
+      const [authUser, setAuthUser] = React.useState(() => checkAuthentication());
       const [activeView, setActiveView] = React.useState('executive');
       const [isEditing, setIsEditing] = React.useState(false);
       const [originalData, setOriginalData] = React.useState(null);
@@ -446,12 +160,14 @@
       const [businessDevActivitiesOriginalData, setBusinessDevActivitiesOriginalData] = React.useState(null);
       
       // PROJECT CATEGORIES - load from localStorage or use defaults
-      // PROJECT CATEGORIES - always use defaults
-      const [projectCategories, setProjectCategories] = React.useState(defaultCategories);
+      const [projectCategories, setProjectCategories] = React.useState(() => 
+        loadFromLocalStorage('projectCategories', defaultCategories)
+      );
       
-      // TEAM DATA - load from Firestore with localStorage fallback
-      const [teamMembers, setTeamMembers] = React.useState(defaultTeamMembers);
-      const [teamMembersLoading, setTeamMembersLoading] = React.useState(true);
+      // TEAM DATA - load from localStorage or use defaults
+      const [teamMembers, setTeamMembers] = React.useState(() => 
+        loadFromLocalStorage('teamMembers', defaultTeamMembers)
+      );
       
       // CURRENT PROJECTS - load from localStorage or use defaults
       const defaultProjects = [
@@ -639,49 +355,7 @@
         loadFromLocalStorage('internalActivities', defaultInternalActivities)
       );
       
-      // Firebase data loading effect
-      React.useEffect(() => {
-        // Skip if user is not authenticated
-        if (!user) return;
-        
-        const loadAllData = async () => {
-          try {
-            // Load team members
-            setTeamMembersLoading(true);
-            const teamMembersData = await loadFromFirestore('teamMembers', defaultTeamMembers);
-            setTeamMembers(teamMembersData);
-            setTeamMembersLoading(false);
-            
-            // Load projects
-            const projectsData = await loadFromFirestore('currentProjects', defaultProjects);
-            setCurrentProjects(projectsData);
-            
-            // Load pipeline projects
-            const pipelineProjectsData = await loadFromFirestore('pipelineProjects', defaultPipelineProjects);
-            setPipelineProjects(pipelineProjectsData);
-            
-            // Load Semblance opportunities
-            const semblanceOpportunitiesData = await loadFromFirestore('semblanceOpportunities', defaultSemblanceOpportunities);
-            setSemblanceOpportunities(semblanceOpportunitiesData);
-            
-            // Load internal activities
-            const internalActivitiesData = await loadFromFirestore('internalActivities', defaultInternalActivities);
-            setInternalActivities(internalActivitiesData);
-            
-            // Load resourcing insights
-            const resourcingInsightsData = await loadFromFirestore('resourcingInsights', defaultResourcingInsights);
-            setResourcingInsights(resourcingInsightsData);
-            
-            showNotification('Data loaded from database');
-          } catch (error) {
-            console.error('Error loading data:', error);
-            showNotification('Using locally saved data', 'warning');
-          }
-        };
-        
-        loadAllData();
-      }, [user]);
-      
+      // Add effect hooks to save data to localStorage when it changes
       // Add effect hook to detect unsaved changes when in edit mode
       React.useEffect(() => {
         if (isEditing && originalData) {
@@ -705,49 +379,34 @@
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
       }, [hasUnsavedChanges]);
       
-      // Save data effects - use Firestore if admin, otherwise localStorage
-      const saveData = async (collection, data) => {
-        // Always save to localStorage for backup
-        saveToLocalStorage(collection, data);
-        
-        // If user is admin, also save to Firestore
-        if (isAdmin && user) {
-          try {
-            await saveToFirestore(collection, data);
-          } catch (error) {
-            console.error(`Error saving ${collection} to Firestore:`, error);
-          }
-        }
-      };
-      
-      // We don't save project categories to remote - they're fixed
+      // Save data to localStorage effects
       React.useEffect(() => {
         saveToLocalStorage('projectCategories', projectCategories);
       }, [projectCategories]);
       
       React.useEffect(() => {
-        saveData('teamMembers', teamMembers);
-      }, [teamMembers, isAdmin, user]);
+        saveToLocalStorage('teamMembers', teamMembers);
+      }, [teamMembers]);
       
       React.useEffect(() => {
-        saveData('currentProjects', currentProjects);
-      }, [currentProjects, isAdmin, user]);
+        saveToLocalStorage('currentProjects', currentProjects);
+      }, [currentProjects]);
       
       React.useEffect(() => {
-        saveData('semblanceOpportunities', semblanceOpportunities);
-      }, [semblanceOpportunities, isAdmin, user]);
+        saveToLocalStorage('semblanceOpportunities', semblanceOpportunities);
+      }, [semblanceOpportunities]);
       
       React.useEffect(() => {
-        saveData('pipelineProjects', pipelineProjects);
-      }, [pipelineProjects, isAdmin, user]);
+        saveToLocalStorage('pipelineProjects', pipelineProjects);
+      }, [pipelineProjects]);
       
       React.useEffect(() => {
-        saveData('resourcingInsights', resourcingInsights);
-      }, [resourcingInsights, isAdmin, user]);
+        saveToLocalStorage('resourcingInsights', resourcingInsights);
+      }, [resourcingInsights]);
       
       React.useEffect(() => {
-        saveData('internalActivities', internalActivities);
-      }, [internalActivities, isAdmin, user]);
+        saveToLocalStorage('internalActivities', internalActivities);
+      }, [internalActivities]);
       
       // CALCULATIONS
       const totalTeamUtilisation = teamMembers.reduce((sum, member) => sum + member.utilisation, 0) / teamMembers.length;
@@ -856,46 +515,47 @@
       
       return (
         <div className="neu-container p-6 mb-10">
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center mb-4">
             <div>
               <h1 className="text-2xl font-bold mb-1">BeSci, UX & AI Strategy Dashboard</h1>
               <h2 className="text-lg text-gray-600">Q3: 3-Month Time Horizon (April-June)</h2>
             </div>
-            <div className="flex items-center space-x-3">
-              {/* User status indicator */}
-              <div className="flex items-center">
-                <span className={`h-3 w-3 rounded-full mr-1 ${isAdmin ? 'bg-green-500' : 'bg-blue-500'}`}></span>
-                <span className="text-sm text-gray-600">
-                  {isAdmin ? 'Admin Mode' : 'View Only Mode'}
-                </span>
-              </div>
-              
-              {/* Logout button */}
-              <button 
-                className="px-3 py-1 text-sm neu-btn"
-                onClick={handleLogout}
-              >
-                Logout
-              </button>
-              
-              {/* Reset button - only for admins */}
-              {isAdmin && (
-                <button 
-                  className="px-3 py-1 text-sm neu-btn neu-primary"
+            {authUser && (
+              <div className="flex items-center space-x-3">
+                <div className={`status-badge ${authUser.isAdmin ? 'bg-blue-100' : 'bg-gray-100'}`}>
+                  {authUser.isAdmin ? 'Admin Mode' : 'View-Only Mode'}
+                </div>
+                <button
+                  className="neu-btn px-3 py-1 text-sm"
                   onClick={() => {
-                    if(window.confirm('Are you sure you want to reset all data to default values? This cannot be undone.')) {
-                      // Clear all localStorage data
-                      Object.keys(localStorage).forEach(key => {
-                        if(key.startsWith('oliverDashboard_')) {
-                          localStorage.removeItem(key);
-                        }
-                      });
-                      // Reset all state to defaults
-                      setProjectCategories(defaultCategories);
-                      setTeamMembers(defaultTeamMembers);
-                      setCurrentProjects(defaultProjects);
-                      setSemblanceOpportunities(defaultSemblanceOpportunities);
-                      setPipelineProjects(defaultPipelineProjects);
+                    localStorage.removeItem('oliverDashboard_authUser');
+                    window.location.href = 'firebase-auth.html';
+                  }}
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex justify-between items-center">
+            <div></div>
+            <button 
+              className="px-3 py-1 text-sm neu-btn neu-primary"
+              onClick={() => {
+                if(window.confirm('Are you sure you want to reset all data to default values? This cannot be undone.')) {
+                  // Clear all localStorage data
+                  Object.keys(localStorage).forEach(key => {
+                    if(key.startsWith('oliverDashboard_')) {
+                      localStorage.removeItem(key);
+                    }
+                  });
+                  // Reset all state to defaults
+                  setProjectCategories(defaultCategories);
+                  setTeamMembers(defaultTeamMembers);
+                  setCurrentProjects(defaultProjects);
+                  setSemblanceOpportunities(defaultSemblanceOpportunities);
+                  setPipelineProjects(defaultPipelineProjects);
                   setResourcingInsights(defaultResourcingInsights);
                   setInternalActivities(defaultInternalActivities);
                   showNotification('Data has been reset to defaults', 'info');
@@ -1053,7 +713,7 @@
               <div className="neu-card p-5">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-semibold">Team Capacity Breakdown</h2>
-                  {!isEditing && (
+                  {!isEditing && authUser && authUser.isAdmin && (
                     <button 
                       className="neu-btn neu-secondary px-4 py-2 text-white"
                       onClick={() => {
@@ -1537,7 +1197,7 @@
             <div className="neu-card p-5">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">Current Projects</h2>
-                {!isEditing && (
+                {!isEditing && authUser && authUser.isAdmin && (
                       <button 
                         className="neu-btn neu-secondary px-4 py-2 text-white"
                         onClick={() => {
@@ -1904,7 +1564,7 @@
                     <div className="p-2 neu-card-inner neu-accent1">
                       <span className="text-blue-800 font-medium">Total potential: £{(semblanceOpportunities.reduce((sum, opp) => sum + opp.value, 0)/1000).toFixed(0)}k</span>
                     </div>
-                    {!isEditing && isAdmin && (
+                    {!isEditing && authUser && authUser.isAdmin && (
                       <button 
                         className="neu-btn neu-secondary px-4 py-2 text-white"
                         onClick={() => {
@@ -2169,7 +1829,7 @@
               <div className="neu-card p-5">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-semibold">Pipeline & Biz Dev</h2>
-                  {!isEditing && (
+                  {!isEditing && authUser && authUser.isAdmin && (
                     <button 
                       className="neu-btn neu-secondary px-4 py-2 text-white rounded hover:shadow-lg"
                       onClick={() => {
@@ -2223,42 +1883,6 @@
               <div className="neu-card p-5">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-semibold">Major Pipeline Opportunities</h2>
-                  <div>
-                    {!editingPipelineOpportunities && isAdmin && (
-                      <button 
-                        className="neu-btn neu-secondary px-4 py-2 text-white"
-                        onClick={() => {
-                          setPipelineOpportunitiesOriginalData(JSON.parse(JSON.stringify(pipelineProjects)));
-                          setEditingPipelineOpportunities(true);
-                        }}
-                      >
-                        Edit Pipeline
-                      </button>
-                    )}
-                    {editingPipelineOpportunities && (
-                      <div className="flex space-x-2">
-                        <button 
-                          className="neu-btn neu-accent3 px-4 py-2"
-                          onClick={() => {
-                            setEditingPipelineOpportunities(false);
-                            setPipelineOpportunitiesOriginalData(null);
-                          }}
-                        >
-                          Save Changes
-                        </button>
-                        <button 
-                          className="neu-btn neu-primary px-4 py-2 text-white"
-                          onClick={() => {
-                            setPipelineProjects(pipelineOpportunitiesOriginalData);
-                            setEditingPipelineOpportunities(false);
-                            setPipelineOpportunitiesOriginalData(null);
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full neu-table">

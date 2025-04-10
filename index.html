@@ -544,34 +544,6 @@
             )}
           </div>
           
-          <div className="flex justify-between items-center">
-            <div></div>
-            <button 
-              className="px-3 py-1 text-sm neu-btn neu-primary"
-              onClick={() => {
-                if(window.confirm('Are you sure you want to reset all data to default values? This cannot be undone.')) {
-                  // Clear all localStorage data
-                  Object.keys(localStorage).forEach(key => {
-                    if(key.startsWith('oliverDashboard_')) {
-                      localStorage.removeItem(key);
-                    }
-                  });
-                  // Reset all state to defaults
-                  setProjectCategories(defaultCategories);
-                  setTeamMembers(defaultTeamMembers);
-                  setCurrentProjects(defaultProjects);
-                  setSemblanceOpportunities(defaultSemblanceOpportunities);
-                  setPipelineProjects(defaultPipelineProjects);
-                  setResourcingInsights(defaultResourcingInsights);
-                  setInternalActivities(defaultInternalActivities);
-                  showNotification('Data has been reset to defaults', 'info');
-                }
-              }}
-            >
-              Reset to Default Data
-            </button>
-          </div>
-          
           <div className="flex mb-6 space-x-3 overflow-x-auto pb-2 mt-5">
             <button 
               className={`neu-btn px-4 py-2 whitespace-nowrap ${activeView === 'executive' ? 'neu-primary' : ''}`}

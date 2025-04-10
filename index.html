@@ -47,36 +47,51 @@
     }
     
     const auth = firebase.auth();
-    const db = firebase.firestore();
     
-    // Add connectivity monitoring
-    let firestoreConnected = true;
+    // Initialize Firestore with proper setup order
+    let db;
+    let firestoreConnected = false;
     
-    // Check Firestore connectivity
-    db.enableNetwork().then(() => {
-      console.log("Firestore network connection enabled");
-      firestoreConnected = true;
-    }).catch(error => {
-      console.error("Error enabling Firestore network:", error);
-      firestoreConnected = false;
-    });
-    
-    // Enable offline persistence
-    db.enablePersistence({
-      synchronizeTabs: true  // Synchronize between tabs on the same device
-    })
-    .catch((err) => {
-      if (err.code === 'failed-precondition') {
-        console.warn("Offline persistence unavailable - multiple tabs open");
-      } else if (err.code === 'unimplemented') {
-        console.warn("Offline persistence not supported by browser");
-      } else {
-        console.error("Offline persistence error:", err);
+    try {
+      // First initialize Firestore
+      db = firebase.firestore();
+      
+      // FIRST: Enable persistence before any other Firestore calls
+      try {
+        // Note: this must be done before any other Firestore calls
+        db.enablePersistence({
+          synchronizeTabs: true  // Synchronize between tabs on the same device
+        }).catch((err) => {
+          if (err.code === 'failed-precondition') {
+            console.warn("Offline persistence unavailable - multiple tabs open");
+          } else if (err.code === 'unimplemented') {
+            console.warn("Offline persistence not supported by browser");
+          } else {
+            console.error("Offline persistence error:", err);
+          }
+        });
+      } catch (persistenceError) {
+        console.warn("Persistence already enabled or cannot be enabled:", persistenceError);
       }
-    });
+      
+      // SECOND: After persistence is set up, enable network
+      db.enableNetwork().then(() => {
+        console.log("Firestore network connection enabled");
+        firestoreConnected = true;
+      }).catch(error => {
+        console.error("Error enabling Firestore network:", error);
+        firestoreConnected = false;
+      });
+    } catch (firestoreError) {
+      console.error("Error initializing Firestore:", firestoreError);
+    }
   </script>
   
   <script type="text/babel">
+    // Global state variables available to all components
+    let globalSyncStatus = 'synced'; // Global variable for sync status
+    let globalShowNotification = null; // Will be set to the notification function once defined
+    
     // Destructure the components we need from Recharts
     const { 
       BarChart, Bar, LineChart, Line, PieChart, Pie, XAxis, YAxis, 
@@ -158,6 +173,7 @@
 
     // Unique client ID to identify this browser/session
     const clientId = `client_${Math.random().toString(36).substring(2, 10)}`;
+    console.log(`[SYNC DEBUG] Generated clientId: ${clientId}`);
     
     // Create a simple debounce function
     const debounce = (func, wait) => {
@@ -171,13 +187,25 @@
     // Create a debounced version of Firestore save
     const debouncedFirestoreSave = debounce(async (docRef, data, key, showSuccessNotification = true) => {
       try {
+        // Check if we're online before attempting a save
+        if (!firestoreConnected) {
+          console.log(`[SYNC DEBUG] Skipping Firestore save for ${key} - offline mode`);
+          // Update global sync status
+          globalSyncStatus = 'offline';
+          if (showSuccessNotification && globalShowNotification) {
+            globalShowNotification('Data saved locally (offline mode)', 'warning');
+          }
+          return false;
+        }
+        
         // Try simple set operation first (most reliable for simple documents)
+        console.log(`[SYNC DEBUG] Saving to Firestore - Key: ${key}, ClientId: ${clientId}, Data sample: ${JSON.stringify(data).substring(0, 50)}...`);
         await docRef.set({
           value: data,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
           lastUpdatedBy: clientId,
           saveType: 'auto'  // Mark as automatic save
-        });
+        }, { merge: false }); // Use merge: false for cleaner overwrites
         
         console.log(`Saved ${key} to Firestore successfully`);
         if (showSuccessNotification) {
@@ -185,7 +213,7 @@
         }
         
         // Force status update
-        setSyncStatus('synced');
+        globalSyncStatus = 'synced';
         return true;
       } catch (error) {
         console.error(`Error saving ${key} to Firestore:`, error);
@@ -196,18 +224,20 @@
           await new Promise(resolve => setTimeout(resolve, 500));
           
           // Try again with a simpler approach
+          console.log(`[SYNC DEBUG] Retrying Firestore save for ${key} after initial failure`);
           await docRef.set({
             value: data,
             updatedAt: new Date().toISOString(),  // Use client-side timestamp
-            lastUpdatedBy: clientId
-          });
+            lastUpdatedBy: clientId,
+            saveType: 'auto_retry'  // Mark as automatic retry save
+          }, { merge: false });
           
           console.log(`Retry save of ${key} to Firestore succeeded`);
           if (showSuccessNotification) {
             showNotification('Data synced to cloud after retry', 'success');
           }
           
-          setSyncStatus('synced');
+          globalSyncStatus = 'synced';
           return true;
         } catch (retryError) {
           console.error(`Retry also failed for ${key}:`, retryError);
@@ -216,7 +246,7 @@
           }
           
           // Force status update
-          setSyncStatus('offline');
+          globalSyncStatus = 'offline';
           return false;
         }
       }
@@ -239,7 +269,7 @@
           if (showSuccessNotification) {
             showNotification('Data saved locally (offline mode)', 'info');
           }
-          setSyncStatus('offline');
+          globalSyncStatus = 'offline';
           return;
         }
         
@@ -258,7 +288,7 @@
       } catch (error) {
         console.error(`Error in saveData for ${key}:`, error);
         showNotification('Failed to save data', 'error');
-        setSyncStatus('offline');
+        globalSyncStatus = 'offline';
       }
     };
     
@@ -272,6 +302,10 @@
     
     // Show notification with improved handling
     const showNotification = (message, type = 'success') => {
+      // Save reference to global variable for use in Firestore functions
+      if (globalShowNotification === null) {
+        globalShowNotification = showNotification;
+      }
       // Generate a unique key for this notification
       const notificationKey = `${type}-${message}`;
       
@@ -320,40 +354,77 @@
       ];
       
       const defaultTeamMembers = [
-        { 
-          name: 'Alec', 
-          role: 'Head of Behavioural Science & UX',
-          allocations: [
-            { project: 'Fairview Homes XD', days: 1, categoryId: 1 },
-            { project: 'Semblance (Synthetic Personas)', days: 3, categoryId: 2 },
-            { project: 'LifeSkills AI Transformation', days: 1, categoryId: 3 },
-            { project: 'Additional work', days: 0.5, categoryId: 4 }
+        {
+          "totalDays": 6,
+          "allocations": [
+            {
+              "project": "Fairview Homes XD",
+              "days": 1,
+              "categoryId": 1
+            },
+            {
+              "project": "Semblance (Synthetic Personas",
+              "categoryId": 2,
+              "days": 3
+            },
+            {
+              "project": "LifeSkills AI Transformation",
+              "days": 1,
+              "categoryId": 3
+            },
+            {
+              "days": 0.5,
+              "project": "Additional Work",
+              "categoryId": 4
+            },
+            {
+              "project": "AMEX AI Governance Consultancy ",
+              "categoryId": 1,
+              "days": 0.5
+            }
           ],
-          totalDays: 5.5,
-          capacity: 4,
-          utilisation: 138
+          "name": "Alec",
+          "utilisation": 150,
+          "capacity": 4,
+          "role": "Head of Behavioural Science & UX"
         },
-        { 
-          name: 'Aarti', 
-          role: 'Lead Experience Planner',
-          allocations: [
-            { project: 'Barclays LifeSkills', days: 2, categoryId: 5 },
-            { project: 'Fairview Homes XD', days: 2, categoryId: 1 }
-          ],
-          totalDays: 4,
-          capacity: 4,
-          utilisation: 100
+        {
+          "utilisation": 100,
+          "capacity": 4,
+          "totalDays": 4,
+          "role": "Lead Experience Planner",
+          "name": "Aarti",
+          "allocations": [
+            {
+              "project": "Barclays LifeSkills",
+              "days": 2,
+              "categoryId": 5
+            },
+            {
+              "project": "Fairview Homes XD",
+              "days": 2,
+              "categoryId": 1
+            }
+          ]
         },
-        { 
-          name: 'Derek Jellow', 
-          role: 'Senior UX Designer',
-          allocations: [
-            { project: 'BMW Websites', days: 2, categoryId: 1 },
-            { project: 'Pinsent Mason', days: 3, categoryId: 5 }
+        {
+          "role": "Senior UX Designer",
+          "allocations": [
+            {
+              "categoryId": 1,
+              "days": 2,
+              "project": "BMW Websites"
+            },
+            {
+              "days": 3,
+              "project": "Pinsent Mason",
+              "categoryId": 5
+            }
           ],
-          totalDays: 5,
-          capacity: 5,
-          utilisation: 100
+          "capacity": 5,
+          "totalDays": 5,
+          "name": "Derek Jellow",
+          "utilisation": 100
         }
       ];
       
@@ -365,6 +436,17 @@
       const [hasUnsavedChanges, setHasUnsavedChanges] = React.useState(false);
       const [dataLoaded, setDataLoaded] = React.useState(false);
       const [syncStatus, setSyncStatus] = React.useState('synced'); // 'synced', 'syncing', 'offline'
+      
+      // Update syncStatus whenever globalSyncStatus changes
+      React.useEffect(() => {
+        const statusCheckInterval = setInterval(() => {
+          if (globalSyncStatus !== syncStatus) {
+            setSyncStatus(globalSyncStatus);
+          }
+        }, 500);
+        
+        return () => clearInterval(statusCheckInterval);
+      }, [syncStatus]);
       
       // Additional state for pipeline section edit modes
       const [editingPipelineOpportunities, setEditingPipelineOpportunities] = React.useState(false);
@@ -384,90 +466,138 @@
       
       // CURRENT PROJECTS - load from localStorage or use defaults
       const defaultProjects = [
-        { 
-          id: 1, 
-          name: 'Fairview Homes',
-          startDate: '2025-04-01',
-          endDate: '2025-07-31',
-          timeframe: 'April to July', // Keeping for backward compatibility
-          value: 20000, 
-          status: 'Confirmed',
-          team: ['Alec', 'Aarti']
+        {
+          "team": [
+            "Alec",
+            "Aarti"
+          ],
+          "status": "Confirmed",
+          "endDate": "2025-07-31",
+          "name": "Fairview Homes",
+          "notes": "Big opportunity; Alec to support",
+          "startDate": "2025-04-01",
+          "value": 20000,
+          "timeframe": "April to July",
+          "id": 1
         },
-        { 
-          id: 2, 
-          name: 'E.ON AI Transformation',
-          startDate: '2025-05-01',
-          endDate: '2025-05-31',
-          timeframe: 'May onwards', // Keeping for backward compatibility
-          value: 40000, 
-          status: 'Pending',
-          notes: 'Value TBC',
-          team: ['Alec']
+        {
+          "team": [
+            "Alec"
+          ],
+          "id": 2,
+          "timeframe": "May to July",
+          "value": 40000,
+          "endDate": "2025-07-31",
+          "startDate": "2025-05-01",
+          "name": "E.ON AI Transformation",
+          "status": "Pending",
+          "notes": "May onwards, value TBC"
         },
-        { 
-          id: 3, 
-          name: 'Barclays BeSci Arrow (Amazon Card)',
-          startDate: '2025-04-01',
-          endDate: '2025-06-30',
-          timeframe: 'April to June', // Keeping for backward compatibility
-          value: 30000, 
-          status: 'Confirmed',
-          team: ['Alec']
+        {
+          "id": 3,
+          "name": "Barclays BeSci Arrow (Amazon Card)",
+          "timeframe": "April to June",
+          "endDate": "2025-06-30",
+          "notes": "3 x additional workstreams to unlock if this is successful",
+          "status": "Confirmed",
+          "team": [
+            "Alec"
+          ],
+          "startDate": "2025-04-01",
+          "value": 30000
         },
-        { 
-          id: 4, 
-          name: 'Crest XD Pitch',
-          startDate: '2025-05-01',
-          endDate: '2025-06-30',
-          timeframe: 'May to June', // Keeping for backward compatibility
-          value: 50000, 
-          status: 'Pitch',
-          notes: 'Cross-functional with Adam',
-          team: ['Alec']
+        {
+          "id": 4,
+          "status": "Pitch",
+          "endDate": "2025-06-28",
+          "team": [
+            "Alec"
+          ],
+          "name": "Crest XD Pitch",
+          "value": 50000,
+          "timeframe": "May to June",
+          "notes": "Cross-functional with Adam",
+          "startDate": "2025-05-01"
         },
-        { 
-          id: 5, 
-          name: 'CPHI Informa Chatbot',
-          startDate: '2025-05-01',
-          endDate: '2025-05-31',
-          timeframe: 'May onwards', // Keeping for backward compatibility
-          value: 40000, 
-          status: 'Pitch',
-          notes: 'Sales pitch £30-50k',
-          team: ['Alec']
+        {
+          "endDate": "2025-05-31",
+          "status": "Pitch",
+          "timeframe": "May onwards",
+          "team": [
+            "Alec"
+          ],
+          "value": 40000,
+          "notes": "Sales pitch £30-50k",
+          "startDate": "2025-05-01",
+          "name": "CPHI Informa Chatbot",
+          "id": 5
         },
-        { 
-          id: 6, 
-          name: 'Slipstream HCD Project',
-          startDate: '2025-05-01',
-          endDate: '2025-05-31',
-          timeframe: '2 months work, unallocated', // Keeping for backward compatibility
-          value: 35000, 
-          status: 'Pending',
-          team: ['Alec']
+        {
+          "value": 0,
+          "team": [
+            "Alec"
+          ],
+          "startDate": "2025-05-01",
+          "notes": "On hold, will resume when resource is available",
+          "timeframe": "May to July",
+          "name": "Slipstream HCD Project",
+          "id": 6,
+          "status": "Pending",
+          "endDate": "2025-07-01"
         },
-        { 
-          id: 7, 
-          name: 'Ford BPQ',
-          startDate: '2025-05-01',
-          endDate: '2025-05-31',
-          timeframe: '4 weeks left + 12 month contract', // Keeping for backward compatibility
-          value: 15000, 
-          status: 'Ongoing',
-          notes: 'Support 0.5 days a week, needs freelancer',
-          team: ['Alec']
+        {
+          "endDate": "2025-06-28",
+          "value": 40000,
+          "startDate": "2025-05-01",
+          "team": [
+            "Alec"
+          ],
+          "name": "Ford BPQO (Immediate)",
+          "status": "Ongoing",
+          "timeframe": "May to June",
+          "id": 7,
+          "notes": "Support 0.5 days a week, needs freelancer"
         },
-        { 
-          id: 8, 
-          name: 'Semblance Synthetic Personas Tool',
-          startDate: '2025-05-01',
-          endDate: '2025-05-31',
-          timeframe: 'Ongoing (3 days every week)', // Keeping for backward compatibility
-          value: 20000, 
-          status: 'Ongoing',
-          notes: 'Min. £20k revenue per usage',
-          team: ['Alec']
+        {
+          "value": 20000,
+          "timeframe": "March to July",
+          "startDate": "2025-03-01",
+          "id": 8,
+          "team": [
+            "Alecf"
+          ],
+          "name": "Semblance Synthetic Personas Tool",
+          "status": "Ongoing",
+          "notes": "Min. £20k revenue per usage",
+          "endDate": "2025-07-31"
+        },
+        {
+          "notes": "Leads into future AI work",
+          "id": 9,
+          "name": "AMEX AI Governance Consultancy",
+          "startDate": "2025-04-28",
+          "value": 25000,
+          "timeframe": "April to May",
+          "endDate": "2025-05-28",
+          "team": [
+            "Alec",
+            "Ric",
+            "Rich"
+          ],
+          "status": "Confirmed"
+        },
+        {
+          "startDate": "2025-06-01",
+          "value": 300000,
+          "name": "Ford BPQO Innovation Stream",
+          "notes": "Hire Iain Beal for 12-month",
+          "endDate": "2025-12-31",
+          "timeframe": "June to December",
+          "status": "Confirmed",
+          "team": [
+            "Alec"
+          ],
+          "id": 10
         }
       ];
       
@@ -477,23 +607,108 @@
       
       // Default Semblance opportunities
       const defaultSemblanceOpportunities = [
-        { client: 'HSBC', status: 'Prospect', value: 20000 },
-        { client: 'HSBC Private Banking', status: 'Prospect', value: 20000 },
-        { client: 'HSBC Asset Management', status: 'Prospect', value: 20000 },
-        { client: 'Jaguar Land Rover InMotion', status: 'Prospect', value: 20000 },
-        { client: 'Clyde & Co', status: 'In Progress', value: 20000, notes: 'Already begun, costing up' },
-        { client: 'Microsoft', status: 'Pitch', value: 20000, notes: 'F2F presenting in April-May' },
-        { client: 'King Gaming', status: 'Pitch', value: 20000, notes: 'F2F presenting in April-May' },
-        { client: 'Informa', status: 'Prospect', value: 20000 },
-        { client: 'Tide', status: 'Pitch', value: 20000, notes: 'F2F presenting in April-May' },
-        { client: 'Arsenal Football Club', status: 'Pitch', value: 20000, notes: 'Presenting in April' },
-        { client: 'Hidden Hearing', status: 'Confirmed', value: 60000, notes: 'Project allocated' },
-        { client: 'NBC Universal', status: 'Prospect', value: 20000 },
-        { client: 'Secret Escapes', status: 'Prospect', value: 20000 },
-        { client: 'Travelex', status: 'Prospect', value: 20000 },
-        { client: 'Teya', status: 'Prospect', value: 20000 },
-        { client: 'Farfetch', status: 'Prospect', value: 20000 },
-        { client: 'BBC Creative', status: 'Prospect', value: 20000 }
+        {
+          "status": "Prospect",
+          "client": "HSBC",
+          "value": 20000,
+          "notes": "CMO Inspired contact"
+        },
+        {
+          "notes": "Rob Green's contact",
+          "status": "Prospect",
+          "value": 20000,
+          "client": "HSBC Private Banking"
+        },
+        {
+          "value": 40000,
+          "notes": "Comparative sustainability messaging testing with existing niche researcher",
+          "status": "Prospect",
+          "client": "HSBC Asset Management"
+        },
+        {
+          "client": "Jaguar Land Rover InMotion",
+          "value": 20000,
+          "notes": "Lunch with Chris Woodward's contact",
+          "status": "Prospect"
+        },
+        {
+          "status": "In Progress",
+          "client": "Clyde & Co",
+          "value": 20000,
+          "notes": "Already begun, costing up"
+        },
+        {
+          "value": 50000,
+          "notes": "F2F presenting - April 17th (morning)",
+          "client": "Microsoft",
+          "status": "Pitch"
+        },
+        {
+          "client": "King Gaming",
+          "notes": "F2F presenting - April 17th (afternoon)",
+          "status": "Pitch",
+          "value": 20000
+        },
+        {
+          "notes": "Ross (CMO Inspired) = new connection inside Informa (vertical we don't currently work with)",
+          "client": "Informa",
+          "status": "Prospect",
+          "value": 20000
+        },
+        {
+          "notes": "F2F and demo on April 15th",
+          "status": "Pitch",
+          "client": "Tide",
+          "value": 20000
+        },
+        {
+          "notes": "Presenting in April, Sales warm lead",
+          "client": "Arsenal Football Club",
+          "value": 40000,
+          "status": "Pitch"
+        },
+        {
+          "notes": "Project and costs allocated",
+          "value": 60000,
+          "client": "Hidden Hearing",
+          "status": "Confirmed"
+        },
+        {
+          "status": "Prospect",
+          "notes": "Media testing, Rob Green nurturing",
+          "value": 19997,
+          "client": "NBC Universal"
+        },
+        {
+          "client": "Secret Escapes",
+          "value": 20000,
+          "notes": "Contact with Louise Nolder",
+          "status": "Prospect"
+        },
+        {
+          "notes": "Contact with Knight",
+          "client": "Travelex",
+          "status": "Prospect",
+          "value": 20000
+        },
+        {
+          "notes": "Small project kick-off in June",
+          "status": "Prospect",
+          "client": "Teya",
+          "value": 20000
+        },
+        {
+          "value": 20000,
+          "notes": "Need to follow-up",
+          "client": "Farfetch",
+          "status": "Prospect"
+        },
+        {
+          "value": 19997,
+          "status": "Prospect",
+          "notes": "Brandtech & Rachel H following up",
+          "client": "BBC Creative"
+        }
       ];
       
       const [semblanceOpportunities, setSemblanceOpportunities] = React.useState(() => 
@@ -502,23 +717,23 @@
       
       // PIPELINE PROJECTS
       const defaultPipelineProjects = [
-        { 
-          name: 'Kimberley-Clark Website Redesign (North America)', 
-          value: 100000, 
-          notes: '£100k+', 
-          status: 'Pipeline' 
+        {
+          "notes": "£100k+",
+          "name": "Kimberley-Clark Website Redesign (North America)",
+          "value": 100000,
+          "status": "Pipeline"
         },
-        { 
-          name: 'Ford - ongoing', 
-          value: 6000000, 
-          notes: '£6m account (needs attention from me)', 
-          status: 'Active Account' 
+        {
+          "name": "Ford - ongoing",
+          "status": "Active Account",
+          "notes": "£6m account (needs attention from me)",
+          "value": 6000000
         },
-        { 
-          name: 'BMW Q3 Pitch', 
-          value: 200000, 
-          notes: 'Estimated value', 
-          status: 'Pipeline' 
+        {
+          "status": "Active Account",
+          "name": "BMW Q3 Pitch",
+          "value": 200000,
+          "notes": "Estimated value"
         }
       ];
       
@@ -529,22 +744,28 @@
       // Default resourcing insights template (content will be updated after calculations)
       const defaultResourcingInsights = [
         {
-          id: 1,
-          type: 'amber',
-          title: 'Opportunity cost',
-          content: 'Without additional resourcing, we risk losing potential Semblance revenue (assuming 50% conversion)'
+          "content": "Without additional resourcing, we risk losing £225k in potential Semblance revenue (assuming 50% conversion)",
+          "id": 1,
+          "title": "Opportunity Cost",
+          "type": "amber"
         },
         {
-          id: 2,
-          type: 'blue',
-          title: 'Focus dilution',
-          content: 'Large accounts like Ford (£6m) aren\'t receiving sufficient attention due to capacity constraints'
+          "content": "Large accounts like Ford (£6m) aren't receiving sufficient attention due to capacity constraints",
+          "id": 2,
+          "title": "Focus Dilution",
+          "type": "blue"
         },
         {
-          id: 3,
-          type: 'green',
-          title: 'ROI calculation',
-          content: 'New hire at £55-65k salary would pay for themselves with just 3 additional Semblance clients or 1 major project'
+          "id": 3,
+          "type": "green",
+          "title": "ROI Calculation",
+          "content": "New hire at £55-65k salary would pay for themselves with just 3 additional Semblance clients or 1 major project"
+        },
+        {
+          "content": "Alec's day-to-day should sit more towards AI strategy as that is where the unilateral value creation comes from",
+          "title": "AI Alignment",
+          "id": 4,
+          "type": "red"
         }
       ];
       
@@ -554,14 +775,59 @@
       
       // INTERNAL AND SALES SUPPORT ACTIVITIES
       const defaultInternalActivities = [
-        { name: 'CMO Inspired', type: 'Keynote', timeframe: 'Q2', timeImpact: 'High' },
-        { name: 'The CMO Network', type: 'Keynote', timeframe: 'Q2', timeImpact: 'High' },
-        { name: 'Procurement Conference', type: 'Keynote', timeframe: 'Late May', timeImpact: 'High' },
-        { name: 'MAD//Fest', type: 'Keynote', timeframe: 'June-July', timeImpact: 'High' },
-        { name: 'BeSci of Performance Marketing', type: 'Presentation', timeframe: 'April', notes: 'To Barclays', timeImpact: 'Medium' },
-        { name: 'Writing new UX Creds for pitches', type: 'Documentation', timeframe: 'Ongoing', timeImpact: 'Medium' },
-        { name: 'Writing and collating case studies', type: 'Documentation', timeframe: 'Ongoing', timeImpact: 'Medium' },
-        { name: 'Dealing with resourcing', type: 'Admin', timeframe: 'Ongoing', notes: 'Minimum 0.5 days a week', timeImpact: 'High' }
+        {
+          "timeframe": "Q2",
+          "notes": "High = 1.5 days; Medium = 0.75 days",
+          "timeImpact": "High",
+          "type": "Keynote",
+          "name": "CMO Inspired"
+        },
+        {
+          "timeframe": "Q2",
+          "type": "Keynote",
+          "timeImpact": "High",
+          "name": "The CMO Network"
+        },
+        {
+          "timeframe": "Late May",
+          "timeImpact": "High",
+          "name": "Procurement Conference",
+          "type": "Keynote"
+        },
+        {
+          "name": "MAD//Fest",
+          "timeframe": "June-July",
+          "timeImpact": "High",
+          "type": "Keynote"
+        },
+        {
+          "timeframe": "April",
+          "notes": "To Barclays - Led to UX \"Arrow\" workstream",
+          "type": "Presentation",
+          "timeImpact": "High",
+          "name": "BeSci of Performance Marketing"
+        },
+        {
+          "timeImpact": "Medium",
+          "name": "Writing new UX Creds for pitches",
+          "timeframe": "Ongoing",
+          "notes": "Aarti to help",
+          "type": "Documentation"
+        },
+        {
+          "type": "Documentation",
+          "notes": "Aarti to help",
+          "timeImpact": "Medium",
+          "timeframe": "Ongoing",
+          "name": "Writing and collating case studies"
+        },
+        {
+          "timeframe": "Ongoing",
+          "timeImpact": "High",
+          "name": "Dealing with resourcing",
+          "type": "Admin",
+          "notes": "Minimum 0.5 days a week"
+        }
       ];
       
       const [internalActivities, setInternalActivities] = React.useState(() => 
@@ -657,6 +923,8 @@
         
         // Debounced update function to prevent too many UI updates
         const debouncedUpdate = (key, setterFunction, newValue) => {
+          console.log(`[SYNC DEBUG] debouncedUpdate called for ${key}`);
+          
           // Clear existing timer if there is one
           if (updateTimers[key]) {
             clearTimeout(updateTimers[key]);
@@ -664,6 +932,7 @@
           
           // Set a new timer
           updateTimers[key] = setTimeout(() => {
+            console.log(`[SYNC DEBUG] ACTUALLY updating state for ${key}`);
             setterFunction(newValue);
             delete updateTimers[key];
             
@@ -691,10 +960,12 @@
               
               // Skip updates for data we just saved ourselves
               const lastUpdatedBy = firestoreData.lastUpdatedBy;
+              console.log(`[SYNC DEBUG] Firestore update received - Key: ${key}, LastUpdatedBy: ${lastUpdatedBy}, CurrentClientId: ${clientId}, Match: ${lastUpdatedBy === clientId}`);
               if (lastUpdatedBy === clientId) {
-                console.log(`Skipping update for ${key} - it's our own save from this client`);
+                console.log(`[SYNC DEBUG] SKIPPING update for ${key} - it's our own save from this client`);
                 return;
               }
+              console.log(`[SYNC DEBUG] PROCESSING update for ${key} - from different client`);
               
               // If someone is saving from this view, update the sync status
               if (firestoreData.saveType === 'manual') {
@@ -702,7 +973,12 @@
               }
               
               // Compare the data using deep equality
-              if (JSON.stringify(firestoreValue) !== JSON.stringify(currentValue)) {
+              const currentValueJSON = JSON.stringify(currentValue);
+              const firestoreValueJSON = JSON.stringify(firestoreValue);
+              const dataChanged = firestoreValueJSON !== currentValueJSON;
+              console.log(`[SYNC DEBUG] Data comparison - Key: ${key}, Changed: ${dataChanged}, DataSize: ${firestoreValueJSON.length}`);
+              
+              if (dataChanged) {
                 console.log(`Real-time update detected for ${key}`);
                 
                 // If editing, be careful about replacing data
@@ -715,13 +991,17 @@
                     ((key === 'pipelineProjects' || key === 'internalActivities') && activeView === 'pipeline') ||
                     (key === 'resourcingInsights' && activeView === 'executive');
                     
+                  console.log(`[SYNC DEBUG] Edit mode check - IsEditing: ${isEditing}, IsEditingThisData: ${isEditingThisData}, ActiveView: ${activeView}`);
+                  
                   if (!isEditingThisData) {
+                    console.log(`[SYNC DEBUG] APPLYING update for ${key} - not being edited`);
                     debouncedUpdate(key, setterFunction, firestoreValue);
                   } else {
-                    console.log(`Skipping update for ${key} - currently being edited`);
+                    console.log(`[SYNC DEBUG] SKIPPING update for ${key} - currently being edited in this view`);
                   }
                 } else {
                   // Not in edit mode, safe to update with debouncing
+                  console.log(`[SYNC DEBUG] APPLYING update for ${key} - not in edit mode`);
                   debouncedUpdate(key, setterFunction, firestoreValue);
                 }
               }

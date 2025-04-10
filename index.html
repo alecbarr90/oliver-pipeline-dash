@@ -187,6 +187,9 @@
     // Create a debounced version of Firestore save
     const debouncedFirestoreSave = debounce(async (docRef, data, key, showSuccessNotification = true) => {
       try {
+        // Always save to localStorage first regardless of Firestore connectivity
+        localStorage.setItem(`oliverDashboard_${key}`, JSON.stringify(data));
+        
         // Check if we're online before attempting a save
         if (!firestoreConnected) {
           console.log(`[SYNC DEBUG] Skipping Firestore save for ${key} - offline mode`);
@@ -198,23 +201,44 @@
           return false;
         }
         
-        // Try simple set operation first (most reliable for simple documents)
-        console.log(`[SYNC DEBUG] Saving to Firestore - Key: ${key}, ClientId: ${clientId}, Data sample: ${JSON.stringify(data).substring(0, 50)}...`);
-        await docRef.set({
-          value: data,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          lastUpdatedBy: clientId,
-          saveType: 'auto'  // Mark as automatic save
-        }, { merge: false }); // Use merge: false for cleaner overwrites
-        
-        console.log(`Saved ${key} to Firestore successfully`);
-        if (showSuccessNotification) {
-          showNotification('Data saved and synced to cloud', 'success');
+        // Get Firebase authentication state
+        const authUser = firebase.auth().currentUser;
+        if (!authUser) {
+          console.log(`[SYNC DEBUG] Skipping Firestore save for ${key} - not authenticated`);
+          globalSyncStatus = 'offline';
+          return false;
         }
         
-        // Force status update
-        globalSyncStatus = 'synced';
-        return true;
+        // Try simple set operation first (most reliable for simple documents)
+        console.log(`[SYNC DEBUG] Saving to Firestore - Key: ${key}, ClientId: ${clientId}, Data sample: ${JSON.stringify(data).substring(0, 50)}...`);
+        
+        try {
+          await docRef.set({
+            value: data,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            lastUpdatedBy: clientId,
+            saveType: 'auto'  // Mark as automatic save
+          }, { merge: false }); // Use merge: false for cleaner overwrites
+        
+          console.log(`Saved ${key} to Firestore successfully`);
+          if (showSuccessNotification) {
+            showNotification('Data saved and synced to cloud', 'success');
+          }
+          
+          // Force status update
+          globalSyncStatus = 'synced';
+          return true;
+        } catch (permissionError) {
+          console.error(`Permission error saving ${key} to Firestore:`, permissionError);
+          
+          // Fallback to localStorage only
+          if (showSuccessNotification) {
+            showNotification('Data saved locally (permission issue with cloud sync)', 'warning');
+          }
+          
+          globalSyncStatus = 'offline';
+          return false;
+        }
       } catch (error) {
         console.error(`Error saving ${key} to Firestore:`, error);
         
@@ -262,6 +286,9 @@
         
         // Always save to localStorage immediately as a backup
         localStorage.setItem(`oliverDashboard_${key}`, JSON.stringify(data));
+        
+        // Set UI state to show syncing
+        globalSyncStatus = 'syncing';
         
         // Check if we're connected to Firebase
         if (!firestoreConnected) {
@@ -866,6 +893,20 @@
           try {
             setSyncStatus('syncing');
             
+            // Check Firestore permissions by trying a simple read
+            try {
+              const testRead = await db.collection('userData').doc(authUser.uid).get();
+              console.log(`[SYNC DEBUG] Firestore permission test: ${testRead.exists ? 'succeeded' : 'document not found but access permitted'}`);
+            } catch (permissionError) {
+              console.warn(`[SYNC DEBUG] Firestore permissions error:`, permissionError);
+              setSyncStatus('offline');
+              showNotification('Using local data only (Firebase permissions issue)', 'warning');
+              
+              // Force data loaded even with errors to prevent loading screen from being stuck
+              setDataLoaded(true);
+              return; // Skip further Firestore operations
+            }
+            
             // Load all data from Firestore
             const teamMembersData = await loadData('teamMembers', teamMembers);
             const currentProjectsData = await loadData('currentProjects', currentProjects);
@@ -950,6 +991,12 @@
         // Function to set up a listener for a specific data type
         const setupListener = (key, setterFunction, currentValue) => {
           try {
+            // Skip if no auth user
+            if (!authUser || !authUser.uid) {
+              console.log(`[SYNC DEBUG] Skipping listener setup for ${key} - no auth user`);
+              return () => {}; // Return empty unsubscribe function
+            }
+            
             const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
             const unsubscribe = docRef.onSnapshot((doc) => {
               if (!doc.exists) return;
@@ -1017,13 +1064,29 @@
           }
         };
         
-        // Set up listeners for each data type
-        setupListener('teamMembers', setTeamMembers, teamMembers);
-        setupListener('currentProjects', setCurrentProjects, currentProjects);
-        setupListener('semblanceOpportunities', setSemblanceOpportunities, semblanceOpportunities);
-        setupListener('pipelineProjects', setPipelineProjects, pipelineProjects);
-        setupListener('resourcingInsights', setResourcingInsights, resourcingInsights);
-        setupListener('internalActivities', setInternalActivities, internalActivities);
+        // First check if we can even access Firestore with current permissions
+        let canAccessFirestore = false;
+        try {
+          // Try a quick test read to check permissions
+          if (authUser && authUser.uid) {
+            // Touch the collection to see if we have permission
+            await db.collection('userData').doc(authUser.uid).get();
+            canAccessFirestore = true;
+          }
+        } catch (permError) {
+          console.warn('[SYNC DEBUG] No Firestore access permission, skipping listeners setup');
+          setSyncStatus('offline');
+        }
+        
+        // Set up listeners for each data type only if we have permission
+        if (canAccessFirestore) {
+          setupListener('teamMembers', setTeamMembers, teamMembers);
+          setupListener('currentProjects', setCurrentProjects, currentProjects);
+          setupListener('semblanceOpportunities', setSemblanceOpportunities, semblanceOpportunities);
+          setupListener('pipelineProjects', setPipelineProjects, pipelineProjects);
+          setupListener('resourcingInsights', setResourcingInsights, resourcingInsights);
+          setupListener('internalActivities', setInternalActivities, internalActivities);
+        }
         
         return () => {
           // Clean up: cancel any pending updates and unsubscribe from listeners

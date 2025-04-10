@@ -49,6 +49,18 @@
     const auth = firebase.auth();
     const db = firebase.firestore();
     
+    // Add connectivity monitoring
+    let firestoreConnected = true;
+    
+    // Check Firestore connectivity
+    db.enableNetwork().then(() => {
+      console.log("Firestore network connection enabled");
+      firestoreConnected = true;
+    }).catch(error => {
+      console.error("Error enabling Firestore network:", error);
+      firestoreConnected = false;
+    });
+    
     // Enable offline persistence
     db.enablePersistence({
       synchronizeTabs: true  // Synchronize between tabs on the same device
@@ -159,17 +171,15 @@
     // Create a debounced version of Firestore save
     const debouncedFirestoreSave = debounce(async (docRef, data, key, showSuccessNotification = true) => {
       try {
-        // Use transaction to ensure consistency
-        await db.runTransaction(async (transaction) => {
-          transaction.set(docRef, {
-            value: data,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            lastUpdatedBy: clientId,
-            saveType: 'auto'  // Mark as automatic save
-          });
+        // Try simple set operation first (most reliable for simple documents)
+        await docRef.set({
+          value: data,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          lastUpdatedBy: clientId,
+          saveType: 'auto'  // Mark as automatic save
         });
         
-        console.log(`Saved ${key} to Firestore`);
+        console.log(`Saved ${key} to Firestore successfully`);
         if (showSuccessNotification) {
           showNotification('Data saved and synced to cloud', 'success');
         }
@@ -179,13 +189,36 @@
         return true;
       } catch (error) {
         console.error(`Error saving ${key} to Firestore:`, error);
-        if (showSuccessNotification) {
-          showNotification('Data saved locally but failed to sync to cloud', 'error');
-        }
         
-        // Force status update
-        setSyncStatus('offline');
-        return false;
+        // Try one more time after a short delay
+        try {
+          // Wait a moment
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Try again with a simpler approach
+          await docRef.set({
+            value: data,
+            updatedAt: new Date().toISOString(),  // Use client-side timestamp
+            lastUpdatedBy: clientId
+          });
+          
+          console.log(`Retry save of ${key} to Firestore succeeded`);
+          if (showSuccessNotification) {
+            showNotification('Data synced to cloud after retry', 'success');
+          }
+          
+          setSyncStatus('synced');
+          return true;
+        } catch (retryError) {
+          console.error(`Retry also failed for ${key}:`, retryError);
+          if (showSuccessNotification) {
+            showNotification('Data saved locally but failed to sync to cloud', 'error');
+          }
+          
+          // Force status update
+          setSyncStatus('offline');
+          return false;
+        }
       }
     }, 300); // 300ms debounce
     
@@ -199,6 +232,16 @@
         
         // Always save to localStorage immediately as a backup
         localStorage.setItem(`oliverDashboard_${key}`, JSON.stringify(data));
+        
+        // Check if we're connected to Firebase
+        if (!firestoreConnected) {
+          console.warn('Firestore not connected, data only saved locally');
+          if (showSuccessNotification) {
+            showNotification('Data saved locally (offline mode)', 'info');
+          }
+          setSyncStatus('offline');
+          return;
+        }
         
         // Try to save to Firestore if user is authenticated
         const authUser = JSON.parse(localStorage.getItem('oliverDashboard_authUser'));
@@ -215,6 +258,7 @@
       } catch (error) {
         console.error(`Error in saveData for ${key}:`, error);
         showNotification('Failed to save data', 'error');
+        setSyncStatus('offline');
       }
     };
     
@@ -1080,21 +1124,38 @@
                               if (!authUser || !authUser.uid) return false;
                               
                               const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
-                              // Use a simple transaction to ensure the write completes
-                              await db.runTransaction(async (transaction) => {
-                                transaction.set(docRef, {
-                                  value: data,
-                                  updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                                  lastUpdatedBy: clientId,  // Use client ID instead of generic marker
-                                  saveType: 'manual'
-                                });
+                              // Try a direct set operation first (more reliable than transaction for simple writes)
+                              await docRef.set({
+                                value: data,
+                                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                lastUpdatedBy: clientId,  // Use client ID instead of generic marker
+                                saveType: 'manual'
                               });
                               
                               console.log(`Manual save of ${key} complete`);
                               return true;
                             } catch (error) {
                               console.error(`Error saving ${key}:`, error);
-                              return false;
+                              
+                              // Try one more time after a delay
+                              try {
+                                // Wait a moment
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                                
+                                // Try a simpler approach without server timestamp
+                                await docRef.set({
+                                  value: data,
+                                  updatedAt: new Date().toISOString(),
+                                  lastUpdatedBy: clientId,
+                                  saveType: 'manual_retry'
+                                });
+                                
+                                console.log(`Retry save of ${key} succeeded`);
+                                return true;
+                              } catch (retryError) {
+                                console.error(`Retry also failed for ${key}:`, retryError);
+                                return false;
+                              }
                             }
                           };
                           
@@ -2262,21 +2323,38 @@
                               if (!authUser || !authUser.uid) return false;
                               
                               const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
-                              // Use a simple transaction to ensure the write completes
-                              await db.runTransaction(async (transaction) => {
-                                transaction.set(docRef, {
-                                  value: data,
-                                  updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                                  lastUpdatedBy: clientId,  // Use client ID instead of generic marker
-                                  saveType: 'manual'
-                                });
+                              // Try a direct set operation first (more reliable than transaction for simple writes)
+                              await docRef.set({
+                                value: data,
+                                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                lastUpdatedBy: clientId,  // Use client ID instead of generic marker
+                                saveType: 'manual'
                               });
                               
                               console.log(`Manual save of ${key} complete`);
                               return true;
                             } catch (error) {
                               console.error(`Error saving ${key}:`, error);
-                              return false;
+                              
+                              // Try one more time after a delay
+                              try {
+                                // Wait a moment
+                                await new Promise(resolve => setTimeout(resolve, 500));
+                                
+                                // Try a simpler approach without server timestamp
+                                await docRef.set({
+                                  value: data,
+                                  updatedAt: new Date().toISOString(),
+                                  lastUpdatedBy: clientId,
+                                  saveType: 'manual_retry'
+                                });
+                                
+                                console.log(`Retry save of ${key} succeeded`);
+                                return true;
+                              } catch (retryError) {
+                                console.error(`Retry also failed for ${key}:`, retryError);
+                                return false;
+                              }
                             }
                           };
                           

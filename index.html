@@ -74,6 +74,22 @@
       return JSON.parse(authUser);
     };
     
+    // Track the last update source to prevent loops
+    const updateSourceRef = React.useRef({});
+    
+    // Debounce function to prevent too many updates
+    const debounce = (func, wait) => {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    };
+    
     // Unified data loading function that tries Firestore first, falls back to localStorage
     const loadData = async (key, defaultValue) => {
       try {
@@ -88,6 +104,9 @@
           throw new Error('No authenticated user');
         }
         
+        // Track this load operation
+        updateSourceRef.current[key] = 'loading';
+        
         // Try to get data from Firestore
         try {
           const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
@@ -95,6 +114,7 @@
           
           if (doc.exists) {
             console.log(`Loaded ${key} from Firestore`);
+            updateSourceRef.current[key] = 'firestore';
             return doc.data().value;
           }
         } catch (firestoreError) {
@@ -108,14 +128,20 @@
           console.log(`Loaded ${key} from localStorage`);
           
           // If we found data in localStorage but not in Firestore, save it to Firestore
-          saveData(key, parsedData, false);
+          // Use setTimeout to prevent immediate save conflicts
+          setTimeout(() => {
+            saveData(key, parsedData, false);
+          }, 1000);
           
+          updateSourceRef.current[key] = 'localStorage';
           return parsedData;
         }
         
+        updateSourceRef.current[key] = 'default';
         return defaultValue;
       } catch (error) {
         console.error(`Error loading ${key}:`, error);
+        updateSourceRef.current[key] = 'error';
         return defaultValue;
       }
     };
@@ -136,6 +162,38 @@
       }
     };
 
+    // Create a debounced version of the save function
+    const debouncedSaveToFirestore = debounce(async (key, data, showSuccessNotification) => {
+      const authUser = JSON.parse(localStorage.getItem('oliverDashboard_authUser'));
+      if (!authUser || !authUser.uid) {
+        console.warn('No authenticated user, data only saved locally');
+        return;
+      }
+      
+      try {
+        // Track this save operation
+        updateSourceRef.current[key] = 'saving';
+        
+        const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
+        await docRef.set({
+          value: data,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          lastUpdatedBy: 'client_' + Math.random().toString(36).substr(2, 9) // Unique client ID
+        });
+        
+        updateSourceRef.current[key] = 'saved';
+        console.log(`Saved ${key} to Firestore`);
+        
+        if (showSuccessNotification) {
+          showNotification('Data saved and synced to cloud', 'success');
+        }
+      } catch (firestoreError) {
+        console.error(`Error saving to Firestore:`, firestoreError);
+        updateSourceRef.current[key] = 'error';
+        showNotification('Data saved locally but failed to sync to cloud', 'error');
+      }
+    }, 500); // 500ms debounce
+    
     // Unified save function that saves to both Firestore and localStorage
     const saveData = async (key, data, showSuccessNotification = true) => {
       try {
@@ -147,30 +205,16 @@
         // Always save to localStorage as a backup
         localStorage.setItem(`oliverDashboard_${key}`, JSON.stringify(data));
         
-        // Try to save to Firestore if user is authenticated
-        const authUser = JSON.parse(localStorage.getItem('oliverDashboard_authUser'));
-        if (!authUser || !authUser.uid) {
-          console.warn('No authenticated user, data only saved locally');
-          return;
+        // If we're in edit mode, mark data as pending sync
+        if (isEditing) {
+          updateSourceRef.current[key] = 'pendingSync';
         }
         
-        try {
-          const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
-          await docRef.set({
-            value: data,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          if (showSuccessNotification) {
-            showNotification('Data saved and synced to cloud', 'success');
-          }
-          console.log(`Saved ${key} to Firestore`);
-        } catch (firestoreError) {
-          console.error(`Error saving to Firestore:`, firestoreError);
-          showNotification('Data saved locally but failed to sync to cloud', 'error');
-        }
+        // Save to Firestore using debounced function
+        debouncedSaveToFirestore(key, data, showSuccessNotification);
       } catch (error) {
         console.error(`Error saving ${key}:`, error);
+        updateSourceRef.current[key] = 'error';
         showNotification('Failed to save data', 'error');
       }
     };
@@ -180,18 +224,34 @@
       saveData(key, data);
     };
     
-    // Show notification
+    // Track active notifications to avoid duplicates
+    const activeNotificationsRef = React.useRef({});
+    
+    // Show notification with improved handling
     const showNotification = (message, type = 'success') => {
-      const notification = document.createElement('div');
+      // Only show one notification of each type at a time
+      const notificationKey = `${type}:${message}`;
       
-      // Use our external CSS classes
+      // If this exact notification is already showing, don't show it again
+      if (activeNotificationsRef.current[notificationKey]) {
+        return;
+      }
+      
+      // Create notification element
+      const notification = document.createElement('div');
       notification.className = `notification notification-${type}`;
       notification.innerHTML = message;
-      document.body.appendChild(notification);
       
-      // Remove notification after 3 seconds
+      // Add to DOM and track it
+      document.body.appendChild(notification);
+      activeNotificationsRef.current[notificationKey] = notification;
+      
+      // Remove after delay
       setTimeout(() => {
-        notification.remove();
+        if (activeNotificationsRef.current[notificationKey]) {
+          notification.remove();
+          delete activeNotificationsRef.current[notificationKey];
+        }
       }, 3000);
     };
 
@@ -528,60 +588,85 @@
         loadDataFromFirestore();
       }, [authUser]); // Only run when auth changes
       
+      // Track notification timers to prevent excessive notifications
+      const notificationTimersRef = React.useRef({});
+      
+      // Function to limit notifications to once per 5 seconds per type
+      const throttledNotification = (message, type, key) => {
+        const now = Date.now();
+        const lastTime = notificationTimersRef.current[key] || 0;
+        
+        if (now - lastTime > 5000) { // 5 seconds
+          showNotification(message, type);
+          notificationTimersRef.current[key] = now;
+        }
+      };
+      
       // Set up Firestore listeners for real-time updates
       React.useEffect(() => {
-        if (!authUser || !dataLoaded) return; // Remove isEditing condition to keep listeners active during editing
+        if (!authUser || !dataLoaded) return;
         
         const unsubscribers = [];
+        let initialLoadComplete = false;
         
-        // Function to set up a listener for a specific data type
+        // Function to determine if we should apply an update from Firestore
+        const shouldApplyUpdate = (key, currentValue, newValue, metadata) => {
+          // If we're currently saving this data, ignore the update (it's our own)
+          if (updateSourceRef.current[key] === 'saving' || 
+              updateSourceRef.current[key] === 'pendingSync') {
+            return false;
+          }
+          
+          // If we're editing data that matches this key, don't update it
+          if (isEditing) {
+            const isEditingThisData = 
+              (key === 'teamMembers' && activeView === 'capacity') ||
+              (key === 'currentProjects' && activeView === 'projects') ||
+              (key === 'semblanceOpportunities' && activeView === 'semblance') ||
+              ((key === 'pipelineProjects' || key === 'internalActivities') && activeView === 'pipeline') ||
+              (key === 'resourcingInsights' && activeView === 'executive');
+              
+            if (isEditingThisData) {
+              return false;
+            }
+          }
+          
+          // Deep compare the data to see if there are actual changes
+          return JSON.stringify(currentValue) !== JSON.stringify(newValue);
+        };
+        
+        // Set up a single listener for all data types
         const setupListener = (key, setterFunction, currentValue) => {
           try {
             const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
+            
             const unsubscribe = docRef.onSnapshot((doc) => {
               if (!doc.exists) return;
               
-              // Get the Firestore timestamp and data
               const firestoreData = doc.data();
               const firestoreValue = firestoreData.value;
-              const firestoreTimestamp = firestoreData.updatedAt?.toMillis() || 0;
               
-              // Check if the data has changed
-              if (JSON.stringify(firestoreValue) !== JSON.stringify(currentValue)) {
+              // Wait for initial load to complete before showing notifications
+              if (initialLoadComplete && shouldApplyUpdate(key, currentValue, firestoreValue, firestoreData)) {
                 console.log(`Real-time update for ${key}`);
+                setterFunction(firestoreValue);
                 
-                // If editing, we need to be careful about replacing data
-                if (isEditing) {
-                  // If we're editing the current data type, don't update to avoid losing changes
-                  // But for other data types, we can safely update
-                  if ((key === 'teamMembers' && activeView !== 'capacity') ||
-                      (key === 'currentProjects' && activeView !== 'projects') ||
-                      (key === 'semblanceOpportunities' && activeView !== 'semblance') ||
-                      ((key === 'pipelineProjects' || key === 'internalActivities') && activeView !== 'pipeline') ||
-                      (key === 'resourcingInsights' && activeView !== 'executive')) {
-                        
-                    setterFunction(firestoreValue);
-                    showNotification('Data updated from another device', 'info');
-                  } else {
-                    console.log(`Skipping update for ${key} because it's being edited`);
-                  }
-                } else {
-                  // Not in edit mode, safe to update
-                  setterFunction(firestoreValue);
-                  showNotification('Data updated from another device', 'info');
-                }
+                // Throttle notifications to prevent UI flickering
+                throttledNotification('Data updated from another device', 'info', key);
               }
             }, (error) => {
               console.error(`Real-time listener error for ${key}:`, error);
+              setSyncStatus('offline');
             });
             
             unsubscribers.push(unsubscribe);
           } catch (error) {
             console.error(`Error setting up listener for ${key}:`, error);
+            setSyncStatus('offline');
           }
         };
         
-        // Set up listeners for each data type
+        // Set up all listeners
         setupListener('teamMembers', setTeamMembers, teamMembers);
         setupListener('currentProjects', setCurrentProjects, currentProjects);
         setupListener('semblanceOpportunities', setSemblanceOpportunities, semblanceOpportunities);
@@ -589,11 +674,17 @@
         setupListener('resourcingInsights', setResourcingInsights, resourcingInsights);
         setupListener('internalActivities', setInternalActivities, internalActivities);
         
+        // Mark initial load as complete after a short delay
+        setTimeout(() => {
+          initialLoadComplete = true;
+          setSyncStatus('synced');
+        }, 1000);
+        
         return () => {
           // Unsubscribe from all listeners when component unmounts or deps change
           unsubscribers.forEach(unsubscribe => unsubscribe());
         };
-      }, [authUser, dataLoaded, activeView]); // Remove isEditing from dependencies, add activeView
+      }, [authUser, dataLoaded]); // Keep dependencies minimal to prevent listener churn
       
       // Save data effects
       React.useEffect(() => {
@@ -950,28 +1041,71 @@
                       <button 
                         className="neu-btn neu-accent3 px-4 py-2"
                         onClick={async () => {
+                          // First, save to localStorage and mark as not editing
                           setIsEditing(false);
                           setOriginalData(null);
-                          // Force immediate sync to Firestore for all collections that might have changed
+                          
+                          // Update UI state to show we're syncing
                           setSyncStatus('syncing');
                           
+                          // Cancel any pending debounced saves
+                          if (window._saveTimeouts) {
+                            window._saveTimeouts.forEach(timeout => clearTimeout(timeout));
+                          }
+                          window._saveTimeouts = [];
+                          
+                          // Helper function to save with proper debouncing
+                          const saveWithFeedback = async (key, data) => {
+                            localStorage.setItem(`oliverDashboard_${key}`, JSON.stringify(data));
+                            
+                            // Create a promise that will resolve when the save is complete
+                            return new Promise(resolve => {
+                              const timer = setTimeout(async () => {
+                                try {
+                                  const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
+                                  await docRef.set({
+                                    value: data,
+                                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                    lastUpdatedBy: 'manual_save'
+                                  });
+                                  console.log(`Manual save of ${key} complete`);
+                                  resolve(true);
+                                } catch (error) {
+                                  console.error(`Error saving ${key}:`, error);
+                                  resolve(false);
+                                }
+                              }, 300); // Short delay between saves
+                              
+                              window._saveTimeouts.push(timer);
+                            });
+                          };
+                          
                           try {
-                            // Explicitly force sync to Firestore based on active view
+                            // Determine which data needs to be saved based on active view
+                            let savePromises = [];
+                            
                             if (activeView === 'capacity') {
-                              await saveData('teamMembers', teamMembers, false);
+                              savePromises.push(saveWithFeedback('teamMembers', teamMembers));
                             } else if (activeView === 'projects') {
-                              await saveData('currentProjects', currentProjects, false);
+                              savePromises.push(saveWithFeedback('currentProjects', currentProjects));
                             } else if (activeView === 'semblance') {
-                              await saveData('semblanceOpportunities', semblanceOpportunities, false);
+                              savePromises.push(saveWithFeedback('semblanceOpportunities', semblanceOpportunities));
                             } else if (activeView === 'pipeline') {
-                              await Promise.all([
-                                saveData('pipelineProjects', pipelineProjects, false),
-                                saveData('internalActivities', internalActivities, false)
-                              ]);
+                              savePromises.push(saveWithFeedback('pipelineProjects', pipelineProjects));
+                              savePromises.push(saveWithFeedback('internalActivities', internalActivities));
                             }
                             
-                            setSyncStatus('synced');
-                            showNotification('Changes saved and synced to cloud', 'success');
+                            // Wait for all saves to complete
+                            const results = await Promise.all(savePromises);
+                            
+                            // Check if any saves failed
+                            if (results.includes(false)) {
+                              setSyncStatus('offline');
+                              showNotification('Some changes failed to sync to cloud', 'error');
+                            } else {
+                              setSyncStatus('synced');
+                              showNotification('Changes saved and synced to cloud', 'success');
+                            }
                           } catch (error) {
                             console.error('Error during save sync:', error);
                             setSyncStatus('offline');
@@ -2094,28 +2228,71 @@
                       <button 
                         className="neu-btn neu-accent3 px-4 py-2"
                         onClick={async () => {
+                          // First, save to localStorage and mark as not editing
                           setIsEditing(false);
                           setOriginalData(null);
-                          // Force immediate sync to Firestore for all collections that might have changed
+                          
+                          // Update UI state to show we're syncing
                           setSyncStatus('syncing');
                           
+                          // Cancel any pending debounced saves
+                          if (window._saveTimeouts) {
+                            window._saveTimeouts.forEach(timeout => clearTimeout(timeout));
+                          }
+                          window._saveTimeouts = [];
+                          
+                          // Helper function to save with proper debouncing
+                          const saveWithFeedback = async (key, data) => {
+                            localStorage.setItem(`oliverDashboard_${key}`, JSON.stringify(data));
+                            
+                            // Create a promise that will resolve when the save is complete
+                            return new Promise(resolve => {
+                              const timer = setTimeout(async () => {
+                                try {
+                                  const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
+                                  await docRef.set({
+                                    value: data,
+                                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                    lastUpdatedBy: 'manual_save'
+                                  });
+                                  console.log(`Manual save of ${key} complete`);
+                                  resolve(true);
+                                } catch (error) {
+                                  console.error(`Error saving ${key}:`, error);
+                                  resolve(false);
+                                }
+                              }, 300); // Short delay between saves
+                              
+                              window._saveTimeouts.push(timer);
+                            });
+                          };
+                          
                           try {
-                            // Explicitly force sync to Firestore based on active view
+                            // Determine which data needs to be saved based on active view
+                            let savePromises = [];
+                            
                             if (activeView === 'capacity') {
-                              await saveData('teamMembers', teamMembers, false);
+                              savePromises.push(saveWithFeedback('teamMembers', teamMembers));
                             } else if (activeView === 'projects') {
-                              await saveData('currentProjects', currentProjects, false);
+                              savePromises.push(saveWithFeedback('currentProjects', currentProjects));
                             } else if (activeView === 'semblance') {
-                              await saveData('semblanceOpportunities', semblanceOpportunities, false);
+                              savePromises.push(saveWithFeedback('semblanceOpportunities', semblanceOpportunities));
                             } else if (activeView === 'pipeline') {
-                              await Promise.all([
-                                saveData('pipelineProjects', pipelineProjects, false),
-                                saveData('internalActivities', internalActivities, false)
-                              ]);
+                              savePromises.push(saveWithFeedback('pipelineProjects', pipelineProjects));
+                              savePromises.push(saveWithFeedback('internalActivities', internalActivities));
                             }
                             
-                            setSyncStatus('synced');
-                            showNotification('Changes saved and synced to cloud', 'success');
+                            // Wait for all saves to complete
+                            const results = await Promise.all(savePromises);
+                            
+                            // Check if any saves failed
+                            if (results.includes(false)) {
+                              setSyncStatus('offline');
+                              showNotification('Some changes failed to sync to cloud', 'error');
+                            } else {
+                              setSyncStatus('synced');
+                              showNotification('Changes saved and synced to cloud', 'success');
+                            }
                           } catch (error) {
                             console.error('Error during save sync:', error);
                             setSyncStatus('offline');

@@ -530,7 +530,7 @@
       
       // Set up Firestore listeners for real-time updates
       React.useEffect(() => {
-        if (!authUser || !dataLoaded || isEditing) return;
+        if (!authUser || !dataLoaded) return; // Remove isEditing condition to keep listeners active during editing
         
         const unsubscribers = [];
         
@@ -546,11 +546,30 @@
               const firestoreValue = firestoreData.value;
               const firestoreTimestamp = firestoreData.updatedAt?.toMillis() || 0;
               
-              // Only update if not editing and data has changed
-              if (!isEditing && JSON.stringify(firestoreValue) !== JSON.stringify(currentValue)) {
+              // Check if the data has changed
+              if (JSON.stringify(firestoreValue) !== JSON.stringify(currentValue)) {
                 console.log(`Real-time update for ${key}`);
-                setterFunction(firestoreValue);
-                showNotification('Data updated from another device', 'info');
+                
+                // If editing, we need to be careful about replacing data
+                if (isEditing) {
+                  // If we're editing the current data type, don't update to avoid losing changes
+                  // But for other data types, we can safely update
+                  if ((key === 'teamMembers' && activeView !== 'capacity') ||
+                      (key === 'currentProjects' && activeView !== 'projects') ||
+                      (key === 'semblanceOpportunities' && activeView !== 'semblance') ||
+                      ((key === 'pipelineProjects' || key === 'internalActivities') && activeView !== 'pipeline') ||
+                      (key === 'resourcingInsights' && activeView !== 'executive')) {
+                        
+                    setterFunction(firestoreValue);
+                    showNotification('Data updated from another device', 'info');
+                  } else {
+                    console.log(`Skipping update for ${key} because it's being edited`);
+                  }
+                } else {
+                  // Not in edit mode, safe to update
+                  setterFunction(firestoreValue);
+                  showNotification('Data updated from another device', 'info');
+                }
               }
             }, (error) => {
               console.error(`Real-time listener error for ${key}:`, error);
@@ -574,7 +593,7 @@
           // Unsubscribe from all listeners when component unmounts or deps change
           unsubscribers.forEach(unsubscribe => unsubscribe());
         };
-      }, [authUser, dataLoaded, isEditing]); // Re-establish listeners if auth changes or edit mode ends
+      }, [authUser, dataLoaded, activeView]); // Remove isEditing from dependencies, add activeView
       
       // Save data effects
       React.useEffect(() => {
@@ -930,10 +949,34 @@
                       )}
                       <button 
                         className="neu-btn neu-accent3 px-4 py-2"
-                        onClick={() => {
+                        onClick={async () => {
                           setIsEditing(false);
                           setOriginalData(null);
-                          showNotification('Changes saved and synced to cloud', 'success');
+                          // Force immediate sync to Firestore for all collections that might have changed
+                          setSyncStatus('syncing');
+                          
+                          try {
+                            // Explicitly force sync to Firestore based on active view
+                            if (activeView === 'capacity') {
+                              await saveData('teamMembers', teamMembers, false);
+                            } else if (activeView === 'projects') {
+                              await saveData('currentProjects', currentProjects, false);
+                            } else if (activeView === 'semblance') {
+                              await saveData('semblanceOpportunities', semblanceOpportunities, false);
+                            } else if (activeView === 'pipeline') {
+                              await Promise.all([
+                                saveData('pipelineProjects', pipelineProjects, false),
+                                saveData('internalActivities', internalActivities, false)
+                              ]);
+                            }
+                            
+                            setSyncStatus('synced');
+                            showNotification('Changes saved and synced to cloud', 'success');
+                          } catch (error) {
+                            console.error('Error during save sync:', error);
+                            setSyncStatus('offline');
+                            showNotification('Changes saved locally but sync failed', 'error');
+                          }
                         }}
                       >
                         Save & Sync Changes
@@ -2050,10 +2093,34 @@
                       )}
                       <button 
                         className="neu-btn neu-accent3 px-4 py-2"
-                        onClick={() => {
+                        onClick={async () => {
                           setIsEditing(false);
                           setOriginalData(null);
-                          showNotification('Changes saved and synced to cloud', 'success');
+                          // Force immediate sync to Firestore for all collections that might have changed
+                          setSyncStatus('syncing');
+                          
+                          try {
+                            // Explicitly force sync to Firestore based on active view
+                            if (activeView === 'capacity') {
+                              await saveData('teamMembers', teamMembers, false);
+                            } else if (activeView === 'projects') {
+                              await saveData('currentProjects', currentProjects, false);
+                            } else if (activeView === 'semblance') {
+                              await saveData('semblanceOpportunities', semblanceOpportunities, false);
+                            } else if (activeView === 'pipeline') {
+                              await Promise.all([
+                                saveData('pipelineProjects', pipelineProjects, false),
+                                saveData('internalActivities', internalActivities, false)
+                              ]);
+                            }
+                            
+                            setSyncStatus('synced');
+                            showNotification('Changes saved and synced to cloud', 'success');
+                          } catch (error) {
+                            console.error('Error during save sync:', error);
+                            setSyncStatus('offline');
+                            showNotification('Changes saved locally but sync failed', 'error');
+                          }
                         }}
                       >
                         Save & Sync Changes

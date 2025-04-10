@@ -19,12 +19,43 @@
   <!-- Babel for JSX -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+  
   <!-- Custom CSS -->
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="p-4">
   <div id="root" class="max-w-7xl mx-auto"></div>
 
+  <script>
+    // Initialize Firebase
+    const firebaseConfig = {
+      apiKey: "AIzaSyB5vv6Jt3YNkgM9EGPlsUgFLsWbUBxMMkY",
+      authDomain: "oliver-pipeline-dashboard.firebaseapp.com",
+      projectId: "oliver-pipeline-dashboard",
+      storageBucket: "oliver-pipeline-dashboard.appspot.com",
+      messagingSenderId: "428915476384",
+      appId: "1:428915476384:web:f84992725b976292efc6c5"
+    };
+    
+    // Initialize Firebase if not already initialized
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    
+    // Enable offline persistence
+    db.enablePersistence()
+      .catch((err) => {
+        console.error("Offline persistence error:", err.code);
+      });
+  </script>
+  
   <script type="text/babel">
     // Destructure the components we need from Recharts
     const { 
@@ -43,7 +74,53 @@
       return JSON.parse(authUser);
     };
     
-    // Load data from localStorage if available
+    // Unified data loading function that tries Firestore first, falls back to localStorage
+    const loadData = async (key, defaultValue) => {
+      try {
+        // For projectCategories, always use the defaults to ensure fixed categories
+        if (key === 'projectCategories') {
+          return defaultValue;
+        }
+        
+        // Try to get the authUser from localStorage
+        const authUser = JSON.parse(localStorage.getItem('oliverDashboard_authUser'));
+        if (!authUser || !authUser.uid) {
+          throw new Error('No authenticated user');
+        }
+        
+        // Try to get data from Firestore
+        try {
+          const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
+          const doc = await docRef.get();
+          
+          if (doc.exists) {
+            console.log(`Loaded ${key} from Firestore`);
+            return doc.data().value;
+          }
+        } catch (firestoreError) {
+          console.warn(`Firestore load failed for ${key}, falling back to localStorage:`, firestoreError);
+        }
+        
+        // Fallback to localStorage
+        const savedData = localStorage.getItem(`oliverDashboard_${key}`);
+        if (savedData) {
+          const parsedData = JSON.parse(savedData);
+          console.log(`Loaded ${key} from localStorage`);
+          
+          // If we found data in localStorage but not in Firestore, save it to Firestore
+          saveData(key, parsedData, false);
+          
+          return parsedData;
+        }
+        
+        return defaultValue;
+      } catch (error) {
+        console.error(`Error loading ${key}:`, error);
+        return defaultValue;
+      }
+    };
+    
+    // Load from localStorage synchronously (for initial render)
     const loadFromLocalStorage = (key, defaultValue) => {
       try {
         // For projectCategories, always use the defaults to ensure fixed categories
@@ -59,17 +136,48 @@
       }
     };
 
-    // Save data to localStorage
-    const saveToLocalStorage = (key, data) => {
+    // Unified save function that saves to both Firestore and localStorage
+    const saveData = async (key, data, showSuccessNotification = true) => {
       try {
         // For projectCategories, skip saving to ensure we always use the defaults
         if (key === 'projectCategories') {
           return;
         }
+        
+        // Always save to localStorage as a backup
         localStorage.setItem(`oliverDashboard_${key}`, JSON.stringify(data));
+        
+        // Try to save to Firestore if user is authenticated
+        const authUser = JSON.parse(localStorage.getItem('oliverDashboard_authUser'));
+        if (!authUser || !authUser.uid) {
+          console.warn('No authenticated user, data only saved locally');
+          return;
+        }
+        
+        try {
+          const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
+          await docRef.set({
+            value: data,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          
+          if (showSuccessNotification) {
+            showNotification('Data saved and synced to cloud', 'success');
+          }
+          console.log(`Saved ${key} to Firestore`);
+        } catch (firestoreError) {
+          console.error(`Error saving to Firestore:`, firestoreError);
+          showNotification('Data saved locally but failed to sync to cloud', 'error');
+        }
       } catch (error) {
-        console.error(`Error saving ${key} to localStorage:`, error);
+        console.error(`Error saving ${key}:`, error);
+        showNotification('Failed to save data', 'error');
       }
+    };
+    
+    // Legacy function for backward compatibility
+    const saveToLocalStorage = (key, data) => {
+      saveData(key, data);
     };
     
     // Show notification
@@ -152,6 +260,8 @@
       const [isEditing, setIsEditing] = React.useState(false);
       const [originalData, setOriginalData] = React.useState(null);
       const [hasUnsavedChanges, setHasUnsavedChanges] = React.useState(false);
+      const [dataLoaded, setDataLoaded] = React.useState(false);
+      const [syncStatus, setSyncStatus] = React.useState('synced'); // 'synced', 'syncing', 'offline'
       
       // Additional state for pipeline section edit modes
       const [editingPipelineOpportunities, setEditingPipelineOpportunities] = React.useState(false);
@@ -379,34 +489,128 @@
         return () => window.removeEventListener('beforeunload', handleBeforeUnload);
       }, [hasUnsavedChanges]);
       
-      // Save data to localStorage effects
+      // Initial data loading from Firestore
       React.useEffect(() => {
-        saveToLocalStorage('projectCategories', projectCategories);
-      }, [projectCategories]);
+        const loadDataFromFirestore = async () => {
+          if (!authUser) return;
+          
+          try {
+            setSyncStatus('syncing');
+            
+            // Load all data from Firestore
+            const teamMembersData = await loadData('teamMembers', teamMembers);
+            const currentProjectsData = await loadData('currentProjects', currentProjects);
+            const semblanceOpportunitiesData = await loadData('semblanceOpportunities', semblanceOpportunities);
+            const pipelineProjectsData = await loadData('pipelineProjects', pipelineProjects);
+            const resourcingInsightsData = await loadData('resourcingInsights', resourcingInsights);
+            const internalActivitiesData = await loadData('internalActivities', internalActivities);
+            
+            // Only update if not in edit mode to prevent overwriting user changes
+            if (!isEditing) {
+              setTeamMembers(teamMembersData);
+              setCurrentProjects(currentProjectsData);
+              setSemblanceOpportunities(semblanceOpportunitiesData);
+              setPipelineProjects(pipelineProjectsData);
+              setResourcingInsights(resourcingInsightsData);
+              setInternalActivities(internalActivitiesData);
+            }
+            
+            setSyncStatus('synced');
+            setDataLoaded(true);
+            showNotification('Data synced from cloud', 'info');
+          } catch (error) {
+            console.error('Error loading data from Firestore:', error);
+            setSyncStatus('offline');
+            setDataLoaded(true);
+          }
+        };
+        
+        loadDataFromFirestore();
+      }, [authUser]); // Only run when auth changes
+      
+      // Set up Firestore listeners for real-time updates
+      React.useEffect(() => {
+        if (!authUser || !dataLoaded || isEditing) return;
+        
+        const unsubscribers = [];
+        
+        // Function to set up a listener for a specific data type
+        const setupListener = (key, setterFunction, currentValue) => {
+          try {
+            const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
+            const unsubscribe = docRef.onSnapshot((doc) => {
+              if (!doc.exists) return;
+              
+              // Get the Firestore timestamp and data
+              const firestoreData = doc.data();
+              const firestoreValue = firestoreData.value;
+              const firestoreTimestamp = firestoreData.updatedAt?.toMillis() || 0;
+              
+              // Only update if not editing and data has changed
+              if (!isEditing && JSON.stringify(firestoreValue) !== JSON.stringify(currentValue)) {
+                console.log(`Real-time update for ${key}`);
+                setterFunction(firestoreValue);
+                showNotification('Data updated from another device', 'info');
+              }
+            }, (error) => {
+              console.error(`Real-time listener error for ${key}:`, error);
+            });
+            
+            unsubscribers.push(unsubscribe);
+          } catch (error) {
+            console.error(`Error setting up listener for ${key}:`, error);
+          }
+        };
+        
+        // Set up listeners for each data type
+        setupListener('teamMembers', setTeamMembers, teamMembers);
+        setupListener('currentProjects', setCurrentProjects, currentProjects);
+        setupListener('semblanceOpportunities', setSemblanceOpportunities, semblanceOpportunities);
+        setupListener('pipelineProjects', setPipelineProjects, pipelineProjects);
+        setupListener('resourcingInsights', setResourcingInsights, resourcingInsights);
+        setupListener('internalActivities', setInternalActivities, internalActivities);
+        
+        return () => {
+          // Unsubscribe from all listeners when component unmounts or deps change
+          unsubscribers.forEach(unsubscribe => unsubscribe());
+        };
+      }, [authUser, dataLoaded, isEditing]); // Re-establish listeners if auth changes or edit mode ends
+      
+      // Save data effects
+      React.useEffect(() => {
+        if (!dataLoaded) return; // Don't save data until initial load is complete
+        saveData('projectCategories', projectCategories);
+      }, [projectCategories, dataLoaded]);
       
       React.useEffect(() => {
-        saveToLocalStorage('teamMembers', teamMembers);
-      }, [teamMembers]);
+        if (!dataLoaded) return;
+        saveData('teamMembers', teamMembers);
+      }, [teamMembers, dataLoaded]);
       
       React.useEffect(() => {
-        saveToLocalStorage('currentProjects', currentProjects);
-      }, [currentProjects]);
+        if (!dataLoaded) return;
+        saveData('currentProjects', currentProjects);
+      }, [currentProjects, dataLoaded]);
       
       React.useEffect(() => {
-        saveToLocalStorage('semblanceOpportunities', semblanceOpportunities);
-      }, [semblanceOpportunities]);
+        if (!dataLoaded) return;
+        saveData('semblanceOpportunities', semblanceOpportunities);
+      }, [semblanceOpportunities, dataLoaded]);
       
       React.useEffect(() => {
-        saveToLocalStorage('pipelineProjects', pipelineProjects);
-      }, [pipelineProjects]);
+        if (!dataLoaded) return;
+        saveData('pipelineProjects', pipelineProjects);
+      }, [pipelineProjects, dataLoaded]);
       
       React.useEffect(() => {
-        saveToLocalStorage('resourcingInsights', resourcingInsights);
-      }, [resourcingInsights]);
+        if (!dataLoaded) return;
+        saveData('resourcingInsights', resourcingInsights);
+      }, [resourcingInsights, dataLoaded]);
       
       React.useEffect(() => {
-        saveToLocalStorage('internalActivities', internalActivities);
-      }, [internalActivities]);
+        if (!dataLoaded) return;
+        saveData('internalActivities', internalActivities);
+      }, [internalActivities, dataLoaded]);
       
       // CALCULATIONS
       const totalTeamUtilisation = teamMembers.reduce((sum, member) => sum + member.utilisation, 0) / teamMembers.length;
@@ -522,9 +726,23 @@
             </div>
             {authUser && (
               <div className="flex items-center space-x-3">
+                {/* Sync status indicator */}
+                <div className={`status-badge flex items-center ${
+                  syncStatus === 'synced' ? 'bg-green-100' : 
+                  syncStatus === 'syncing' ? 'bg-yellow-100' : 'bg-red-100'
+                }`}>
+                  <span className={`inline-block w-2 h-2 rounded-full mr-2 ${
+                    syncStatus === 'synced' ? 'bg-green-500' : 
+                    syncStatus === 'syncing' ? 'bg-yellow-500' : 'bg-red-500'
+                  }`}></span>
+                  {syncStatus === 'synced' ? 'Cloud Synced' : 
+                   syncStatus === 'syncing' ? 'Syncing...' : 'Offline Mode'}
+                </div>
+                
                 <div className={`status-badge ${authUser.isAdmin ? 'bg-blue-100' : 'bg-gray-100'}`}>
                   {authUser.isAdmin ? 'Admin Mode' : 'View-Only Mode'}
                 </div>
+                
                 <button
                   className="neu-btn px-3 py-1 text-sm"
                   onClick={() => {
@@ -715,10 +933,10 @@
                         onClick={() => {
                           setIsEditing(false);
                           setOriginalData(null);
-                          showNotification('Changes saved to localStorage');
+                          showNotification('Changes saved and synced to cloud', 'success');
                         }}
                       >
-                        Save Changes
+                        Save & Sync Changes
                       </button>
                       <button 
                         className="neu-btn neu-primary px-4 py-2 text-white"
@@ -1562,7 +1780,7 @@
                             setOriginalData(null);
                           }}
                         >
-                          Save Changes
+                          Save & Sync Changes
                         </button>
                         <button 
                           className="neu-btn neu-primary px-4 py-2 text-white"
@@ -1835,10 +2053,10 @@
                         onClick={() => {
                           setIsEditing(false);
                           setOriginalData(null);
-                          showNotification('Changes saved to localStorage');
+                          showNotification('Changes saved and synced to cloud', 'success');
                         }}
                       >
-                        Save All Changes
+                        Save & Sync Changes
                       </button>
                       <button 
                         className="neu-btn neu-primary px-4 py-2 text-white"

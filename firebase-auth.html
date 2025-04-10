@@ -84,32 +84,51 @@
       const [isAdmin, setIsAdmin] = React.useState(false);
       const [loading, setLoading] = React.useState(true);
       
-      // Authentication state
+      // Handle manual logout
       React.useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(user => {
-          if (user) {
-            // User is logged in - save auth state and redirect immediately
-            const isAdminUser = user && user.email === 'alecbarr@oliver.agency';
-            
-            // Save auth state to localStorage
-            localStorage.setItem('oliverDashboard_authUser', JSON.stringify({
-              uid: user.uid,
-              email: user.email,
-              isAdmin: isAdminUser,
-              isAnonymous: user.isAnonymous
-            }));
-            
-            // Redirect to main dashboard
-            window.location.href = 'index.html';
-          } else {
-            // No user logged in
+        // Check if user was manually logged out
+        const wasManuallyLoggedOut = sessionStorage.getItem('manualLogout') === 'true';
+        
+        if (wasManuallyLoggedOut) {
+          // Clear the flag
+          sessionStorage.removeItem('manualLogout');
+          
+          // Force firebase logout
+          auth.signOut().then(() => {
             setUser(null);
             setIsAdmin(false);
             setLoading(false);
-          }
-        });
-        
-        return () => unsubscribe();
+          }).catch(error => {
+            console.error("Error signing out:", error);
+            setLoading(false);
+          });
+        } else {
+          // Normal authentication state check
+          const unsubscribe = auth.onAuthStateChanged(user => {
+            if (user) {
+              // User is logged in - save auth state and redirect immediately
+              const isAdminUser = user && user.email === 'alecbarr@oliver.agency';
+              
+              // Save auth state to localStorage
+              localStorage.setItem('oliverDashboard_authUser', JSON.stringify({
+                uid: user.uid,
+                email: user.email,
+                isAdmin: isAdminUser,
+                isAnonymous: user.isAnonymous
+              }));
+              
+              // Redirect to main dashboard
+              window.location.href = 'index.html';
+            } else {
+              // No user logged in
+              setUser(null);
+              setIsAdmin(false);
+              setLoading(false);
+            }
+          });
+          
+          return () => unsubscribe();
+        }
       }, []);
       
       // If still checking auth state

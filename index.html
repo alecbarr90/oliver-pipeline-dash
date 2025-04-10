@@ -528,7 +528,13 @@
                 <button
                   className="neu-btn px-3 py-1 text-sm"
                   onClick={() => {
+                    // Clear local storage auth
                     localStorage.removeItem('oliverDashboard_authUser');
+                    
+                    // Add a flag to prevent auto-login
+                    sessionStorage.setItem('manualLogout', 'true');
+                    
+                    // Redirect to auth page
                     window.location.href = 'firebase-auth.html';
                   }}
                 >

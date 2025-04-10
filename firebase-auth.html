@@ -165,11 +165,45 @@
       const [email, setEmail] = React.useState('');
       const [password, setPassword] = React.useState('');
       const [error, setError] = React.useState('');
-      const [loading, setLoading] = React.useState(false);
+      const [adminLoading, setAdminLoading] = React.useState(false);
+      const [guestLoading, setGuestLoading] = React.useState(false);
+      
+      // Helper function to format error messages
+      const formatErrorMessage = (error) => {
+        // Common Firebase auth errors
+        const errorMessages = {
+          'auth/invalid-email': 'Invalid email address format',
+          'auth/user-disabled': 'This account has been disabled',
+          'auth/user-not-found': 'Invalid email or password',
+          'auth/wrong-password': 'Invalid email or password',
+          'auth/invalid-login-credentials': 'Invalid email or password',
+          'auth/too-many-requests': 'Too many unsuccessful login attempts. Please try again later',
+          'auth/network-request-failed': 'Network error. Please check your connection'
+        };
+        
+        // For object-based errors (Firebase sometimes returns these)
+        if (error.includes('{"error"')) {
+          try {
+            return 'Invalid email or password';
+          } catch (e) {
+            return 'Login failed. Please try again.';
+          }
+        }
+        
+        // Check if error code is in our map
+        for (const [code, message] of Object.entries(errorMessages)) {
+          if (error.includes(code)) {
+            return message;
+          }
+        }
+        
+        // Default fallback message
+        return 'Login failed. Please try again.';
+      };
       
       const handleLogin = async (e) => {
         e.preventDefault();
-        setLoading(true);
+        setAdminLoading(true);
         setError('');
         
         try {
@@ -191,13 +225,13 @@
             window.location.href = 'index.html';
           }
         } catch (error) {
-          setError(error.message);
-          setLoading(false);
+          setError(formatErrorMessage(error.message));
+          setAdminLoading(false);
         }
       };
       
       const handleGuestLogin = async () => {
-        setLoading(true);
+        setGuestLoading(true);
         setError('');
         
         try {
@@ -217,8 +251,8 @@
             window.location.href = 'index.html';
           }
         } catch (error) {
-          setError(error.message);
-          setLoading(false);
+          setError(formatErrorMessage(error.message));
+          setGuestLoading(false);
         }
       };
       
@@ -226,15 +260,22 @@
         <div className="neu-card p-6 mx-auto max-w-md">
           <h1 className="text-2xl font-bold mb-6 text-center">OLIVER Dashboard</h1>
           
-          {error && <div className="error">{error}</div>}
+          {error && (
+            <div className="error mb-4">
+              <svg xmlns="http://www.w3.org/2000/svg" className="inline-block h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2h-1V9a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              {error}
+            </div>
+          )}
           
           <div className="mt-6">
             <button 
               className="neu-btn w-full p-3 neu-accent1 mb-4"
               onClick={handleGuestLogin} 
-              disabled={loading}
+              disabled={guestLoading || adminLoading}
             >
-              {loading ? 'Loading...' : 'Continue as Guest'}
+              {guestLoading ? 'Loading...' : 'Continue as Guest'}
             </button>
             
             <div className="text-center my-4 text-gray-500">— OR —</div>
@@ -266,10 +307,10 @@
               
               <button 
                 type="submit" 
-                disabled={loading}
+                disabled={adminLoading || guestLoading}
                 className="neu-btn w-full p-3"
               >
-                {loading ? 'Logging in...' : 'Login as Admin'}
+                {adminLoading ? 'Logging in...' : 'Login as Admin'}
               </button>
             </form>
           </div>

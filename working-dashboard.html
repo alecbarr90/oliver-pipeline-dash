@@ -21,11 +21,85 @@
   
   <!-- Custom CSS -->
   <link rel="stylesheet" href="styles.css">
+  
+  <style>
+    .auth-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255, 255, 255, 0.95);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+    .auth-card {
+      max-width: 500px;
+      padding: 30px;
+      background: white;
+      border: 2px solid black;
+      border-radius: 8px;
+      box-shadow: 5px 5px 0 rgba(0,0,0,0.1);
+      text-align: center;
+    }
+    .auth-btn {
+      display: inline-block;
+      background-color: #4299e1;
+      color: white;
+      padding: 10px 15px;
+      border: 2px solid black;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      margin-top: 20px;
+      text-decoration: none;
+    }
+  </style>
 </head>
 <body class="p-4">
+  <!-- Auth check overlay that will disappear if authenticated -->
+  <div id="auth-check" class="auth-overlay">
+    <div class="auth-card">
+      <h2 class="text-xl font-bold mb-2">Authentication Required</h2>
+      <p class="mb-4">You must login to access the dashboard.</p>
+      <a href="firebase-auth.html" class="auth-btn">Go to Login</a>
+    </div>
+  </div>
+
   <div id="root" class="max-w-7xl mx-auto"></div>
 
+  <script>
+    // Check for authentication as soon as the page loads
+    document.addEventListener('DOMContentLoaded', function() {
+      const authUser = JSON.parse(localStorage.getItem('oliverDashboard_authUser') || '{}');
+      const isAuthenticated = authUser && authUser.uid;
+      
+      if (isAuthenticated) {
+        // User is authenticated, hide the overlay
+        document.getElementById('auth-check').style.display = 'none';
+      } else {
+        // User is not authenticated, redirect to login after a brief delay
+        setTimeout(() => {
+          window.location.href = 'firebase-auth.html';
+        }, 1500);
+      }
+    });
+  </script>
+
   <script type="text/babel">
+    // Get auth state from localStorage
+    const authUser = JSON.parse(localStorage.getItem('oliverDashboard_authUser') || '{}');
+    const isAdmin = authUser.isAdmin || false;
+    
+    // Handle logout from dashboard
+    const handleLogout = () => {
+      localStorage.removeItem('oliverDashboard_authUser');
+      window.location.href = 'firebase-auth.html';
+    };
+    
     // Destructure the components we need from Recharts
     const { 
       BarChart, Bar, LineChart, Line, PieChart, Pie, XAxis, YAxis, 
@@ -507,22 +581,41 @@
               <h1 className="text-2xl font-bold mb-1">BeSci, UX & AI Strategy Dashboard</h1>
               <h2 className="text-lg text-gray-600">Q3: 3-Month Time Horizon (April-June)</h2>
             </div>
-            <button 
-              className="px-3 py-1 text-sm neu-btn neu-primary"
-              onClick={() => {
-                if(window.confirm('Are you sure you want to reset all data to default values? This cannot be undone.')) {
-                  // Clear all localStorage data
-                  Object.keys(localStorage).forEach(key => {
-                    if(key.startsWith('oliverDashboard_')) {
-                      localStorage.removeItem(key);
-                    }
-                  });
-                  // Reset all state to defaults
-                  setProjectCategories(defaultCategories);
-                  setTeamMembers(defaultTeamMembers);
-                  setCurrentProjects(defaultProjects);
-                  setSemblanceOpportunities(defaultSemblanceOpportunities);
-                  setPipelineProjects(defaultPipelineProjects);
+            <div className="flex items-center space-x-3">
+              {/* User role indicator */}
+              <div className="flex items-center">
+                <span className={`h-3 w-3 rounded-full mr-1 ${isAdmin ? 'bg-green-500' : 'bg-blue-500'}`}></span>
+                <span className="text-sm text-gray-600">
+                  {isAdmin ? 'Admin Mode' : 'View Only Mode'}
+                </span>
+              </div>
+              
+              {/* Logout button */}
+              <button 
+                className="px-3 py-1 text-sm neu-btn"
+                onClick={handleLogout}
+              >
+                Logout
+              </button>
+              
+              {/* Reset button - only for admins */}
+              {isAdmin && (
+                <button 
+                  className="px-3 py-1 text-sm neu-btn neu-primary"
+                  onClick={() => {
+                    if(window.confirm('Are you sure you want to reset all data to default values? This cannot be undone.')) {
+                      // Clear all localStorage data
+                      Object.keys(localStorage).forEach(key => {
+                        if(key.startsWith('oliverDashboard_')) {
+                          localStorage.removeItem(key);
+                        }
+                      });
+                      // Reset all state to defaults
+                      setProjectCategories(defaultCategories);
+                      setTeamMembers(defaultTeamMembers);
+                      setCurrentProjects(defaultProjects);
+                      setSemblanceOpportunities(defaultSemblanceOpportunities);
+                      setPipelineProjects(defaultPipelineProjects);
                   setResourcingInsights(defaultResourcingInsights);
                   setInternalActivities(defaultInternalActivities);
                   showNotification('Data has been reset to defaults', 'info');
@@ -680,7 +773,7 @@
               <div className="neu-card p-5">
                 <div className="flex justify-between items-center mb-4">
                   <h2 className="text-xl font-semibold">Team Capacity Breakdown</h2>
-                  {!isEditing && (
+                  {!isEditing && isAdmin && (
                     <button 
                       className="neu-btn neu-secondary px-4 py-2 text-white"
                       onClick={() => {

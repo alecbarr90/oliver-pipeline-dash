@@ -157,24 +157,34 @@
     };
     
     // Create a debounced version of Firestore save
-    const debouncedFirestoreSave = debounce(async (docRef, data, key, showNotification = true) => {
+    const debouncedFirestoreSave = debounce(async (docRef, data, key, showSuccessNotification = true) => {
       try {
-        await docRef.set({
-          value: data,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          lastUpdatedBy: clientId
+        // Use transaction to ensure consistency
+        await db.runTransaction(async (transaction) => {
+          transaction.set(docRef, {
+            value: data,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            lastUpdatedBy: clientId,
+            saveType: 'auto'  // Mark as automatic save
+          });
         });
         
         console.log(`Saved ${key} to Firestore`);
-        if (showNotification) {
+        if (showSuccessNotification) {
           showNotification('Data saved and synced to cloud', 'success');
         }
+        
+        // Force status update
+        setSyncStatus('synced');
         return true;
       } catch (error) {
         console.error(`Error saving ${key} to Firestore:`, error);
-        if (showNotification) {
+        if (showSuccessNotification) {
           showNotification('Data saved locally but failed to sync to cloud', 'error');
         }
+        
+        // Force status update
+        setSyncStatus('offline');
         return false;
       }
     }, 300); // 300ms debounce
@@ -580,6 +590,21 @@
       // Track debounce timers for each data type to prevent rapid updates
       const updateTimers = {};
       
+      // Function to check sync status periodically
+      const checkSyncStatus = () => {
+        if (syncStatus === 'syncing') {
+          // If we've been in syncing state for more than 5 seconds, reset to synced
+          console.log('Force resetting sync status to synced');
+          setSyncStatus('synced');
+        }
+      };
+      
+      // Set up a periodic check of sync status
+      React.useEffect(() => {
+        const interval = setInterval(checkSyncStatus, 5000);
+        return () => clearInterval(interval);
+      }, [syncStatus]);
+      
       // Set up Firestore listeners for real-time updates
       React.useEffect(() => {
         if (!authUser || !dataLoaded) return;
@@ -620,11 +645,16 @@
               const firestoreData = doc.data();
               const firestoreValue = firestoreData.value;
               
-              // Skip updates for data we just saved
+              // Skip updates for data we just saved ourselves
               const lastUpdatedBy = firestoreData.lastUpdatedBy;
-              if (lastUpdatedBy === 'manual_save') {
-                console.log(`Skipping update for ${key} - it's our own save`);
+              if (lastUpdatedBy === clientId) {
+                console.log(`Skipping update for ${key} - it's our own save from this client`);
                 return;
+              }
+              
+              // If someone is saving from this view, update the sync status
+              if (firestoreData.saveType === 'manual') {
+                setSyncStatus('synced');
               }
               
               // Compare the data using deep equality
@@ -1050,10 +1080,14 @@
                               if (!authUser || !authUser.uid) return false;
                               
                               const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
-                              await docRef.set({
-                                value: data,
-                                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                                lastUpdatedBy: 'manual_save'  // Special marker for manual saves
+                              // Use a simple transaction to ensure the write completes
+                              await db.runTransaction(async (transaction) => {
+                                transaction.set(docRef, {
+                                  value: data,
+                                  updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                  lastUpdatedBy: clientId,  // Use client ID instead of generic marker
+                                  saveType: 'manual'
+                                });
                               });
                               
                               console.log(`Manual save of ${key} complete`);
@@ -2228,10 +2262,14 @@
                               if (!authUser || !authUser.uid) return false;
                               
                               const docRef = db.collection('userData').doc(authUser.uid).collection('data').doc(key);
-                              await docRef.set({
-                                value: data,
-                                updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                                lastUpdatedBy: 'manual_save'  // Special marker for manual saves
+                              // Use a simple transaction to ensure the write completes
+                              await db.runTransaction(async (transaction) => {
+                                transaction.set(docRef, {
+                                  value: data,
+                                  updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                  lastUpdatedBy: clientId,  // Use client ID instead of generic marker
+                                  saveType: 'manual'
+                                });
                               });
                               
                               console.log(`Manual save of ${key} complete`);

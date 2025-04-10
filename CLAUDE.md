@@ -5,14 +5,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 - Single-file React application (index.html) with embedded JSX
 - Uses React, Tailwind CSS, Recharts, and Babel from CDN
-- Client-side only with localStorage for data persistence
+- Firebase authentication and Firestore database for cross-device synchronization
+- Fallback to localStorage for offline support
 - Pipeline and resource allocation dashboard for agency team management
 - Features project tracking, team capacity visualization, and revenue projections
+- Admin/guest user role system with different permissions
 
 ## Development Commands
-- Open `index.html` directly in a browser to view the application
+- Login through `firebase-auth.html` which redirects to `index.html` after authentication
+- You can also open `index.html` directly (it will redirect to auth if needed)
 - No build, lint, or test commands as this is a single-file app
 - Use browser dev tools for debugging
+- Network tab in dev tools helps debug Firestore connectivity issues
 
 ## Code Style Guidelines
 - **JSX**: Standard React syntax with self-closing tags where appropriate
